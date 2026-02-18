@@ -1,0 +1,1054 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Chronos Elite | Master Your Day</title>
+
+  <!-- PWA Meta Tags -->
+  <meta name="theme-color" content="#09090b">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Chronos Elite">
+  <link rel="manifest" id="pwa-manifest">
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
+
+  <!-- React + ReactDOM UMD -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+
+  <!-- Babel Standalone (JSX transpilation in-browser) -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script>
+    // ── Tailwind Config ───────────────────────────────────────────────────────
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Inter','sans-serif'], serif: ['Playfair Display','serif'] },
+          colors: { obsidian: '#09090b', charcoal: '#18181b', gold: '#fbbf24', mist: '#a1a1aa' },
+          animation: { 'fade-in': 'fadeIn 0.5s ease-out', 'slide-up': 'slideUp 0.4s ease-out' },
+          keyframes: {
+            fadeIn:  { '0%': { opacity: '0' }, '100%': { opacity: '1' } },
+            slideUp: { '0%': { transform: 'translateY(20px)', opacity: '0' }, '100%': { transform: 'translateY(0)', opacity: '1' } }
+          }
+        }
+      }
+    };
+
+    // ── PWA Manifest via Blob URL ─────────────────────────────────────────────
+    const ICON_SVG_192 = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' rx='32' fill='%2309090b'/><text x='96' y='140' text-anchor='middle' font-family='Georgia,serif' font-size='120' font-weight='bold' fill='%23fbbf24'>C</text></svg>`;
+    const ICON_SVG_512 = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='80' fill='%2309090b'/><text x='256' y='380' text-anchor='middle' font-family='Georgia,serif' font-size='320' font-weight='bold' fill='%23fbbf24'>C</text></svg>`;
+
+    const manifest = {
+      name: "Chronos Elite",
+      short_name: "Chronos",
+      description: "AI-powered daily planner for high-performers",
+      start_url: ".",
+      display: "standalone",
+      background_color: "#09090b",
+      theme_color: "#09090b",
+      icons: [
+        { src: `data:image/svg+xml,${ICON_SVG_192}`, sizes: "192x192", type: "image/svg+xml" },
+        { src: `data:image/svg+xml,${ICON_SVG_512}`, sizes: "512x512", type: "image/svg+xml" }
+      ]
+    };
+    const manifestBlob = new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' });
+    document.getElementById('pwa-manifest').href = URL.createObjectURL(manifestBlob);
+
+    // ── Service Worker (Network-First with Cache Fallback) ────────────────────
+    if ('serviceWorker' in navigator) {
+      const swCode = `
+        const CACHE = 'chronos-v2';
+        self.addEventListener('install', e => {
+          self.skipWaiting();
+        });
+        self.addEventListener('activate', e => {
+          e.waitUntil(caches.keys().then(keys =>
+            Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
+          ));
+          self.clients.claim();
+        });
+        self.addEventListener('fetch', e => {
+          if (e.request.method !== 'GET') return;
+          e.respondWith(
+            fetch(e.request)
+              .then(r => {
+                const clone = r.clone();
+                caches.open(CACHE).then(c => c.put(e.request, clone));
+                return r;
+              })
+              .catch(() => caches.match(e.request))
+          );
+        });
+      `;
+      const swBlob = new Blob([swCode], { type: 'application/javascript' });
+      const swUrl = URL.createObjectURL(swBlob);
+      navigator.serviceWorker.register(swUrl)
+        .then(() => console.log('[Chronos] Service Worker registered'))
+        .catch(e => console.warn('[Chronos] SW registration failed:', e));
+    }
+  </script>
+
+  <style>
+    body { background-color: #09090b; color: #f4f4f5; -webkit-font-smoothing: antialiased; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #09090b; }
+    ::-webkit-scrollbar-thumb { background: #27272a; border-radius: 3px; }
+    input[type="time"]::-webkit-calendar-picker-indicator { filter: invert(1); }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useCallback } = React;
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CONSTANTS
+// ═══════════════════════════════════════════════════════════════════════════════
+const STORAGE_KEY     = 'chronos_elite_state_v2';
+const API_KEY_STORAGE = 'chronos_api_key';
+
+const AppMode = { BRAIN_DUMP: 'BRAIN_DUMP', SCHEDULE: 'SCHEDULE', FOCUS: 'FOCUS', STATS: 'STATS' };
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// INLINE SVG ICON SYSTEM
+// ═══════════════════════════════════════════════════════════════════════════════
+function createIcon(inner) {
+  return function Icon({ className = "w-5 h-5" }) {
+    return (
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+        stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+        className={`inline-block shrink-0 ${className}`}
+        dangerouslySetInnerHTML={{ __html: inner }} />
+    );
+  };
+}
+
+const Icons = {
+  ArrowRight:   createIcon('<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>'),
+  ArrowLeft:    createIcon('<path d="M19 12H5"/><path d="m12 19-7-7 7-7"/>'),
+  Sparkles:     createIcon('<path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/>'),
+  Box:          createIcon('<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.29 7 12 12 20.71 7"/><line x1="12" x2="12" y1="22" y2="12"/>'),
+  Layers:       createIcon('<path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"/><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"/><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"/>'),
+  PlayCircle:   createIcon('<circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/>'),
+  BarChart3:    createIcon('<path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/>'),
+  Settings:     createIcon('<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>'),
+  Battery:      createIcon('<rect width="16" height="10" x="2" y="7" rx="2"/><line x1="22" x2="22" y1="11" y2="13"/>'),
+  Briefcase:    createIcon('<rect width="20" height="14" x="2" y="7" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>'),
+  Coffee:       createIcon('<path d="M17 8h1a4 4 0 1 1 0 8h-1"/><path d="M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Z"/><line x1="6" x2="6" y1="2" y2="4"/><line x1="10" x2="10" y1="2" y2="4"/><line x1="14" x2="14" y1="2" y2="4"/>'),
+  Users:        createIcon('<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>'),
+  Zap:          createIcon('<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>'),
+  CheckCircle2: createIcon('<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>'),
+  Circle:       createIcon('<circle cx="12" cy="12" r="10"/>'),
+  Plus:         createIcon('<path d="M5 12h14"/><path d="M12 5v14"/>'),
+  ListChecks:   createIcon('<path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/>'),
+  CalendarDays: createIcon('<rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/><path d="M8 14h.01"/><path d="M12 14h.01"/><path d="M16 14h.01"/><path d="M8 18h.01"/><path d="M12 18h.01"/><path d="M16 18h.01"/>'),
+  X:            createIcon('<path d="M18 6 6 18"/><path d="m6 6 12 12"/>'),
+  Trash2:       createIcon('<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/>'),
+  Save:         createIcon('<path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"/><path d="M7 3v4a1 1 0 0 0 1 1h7"/>'),
+  CheckSquare:  createIcon('<polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>'),
+  Square:       createIcon('<rect width="18" height="18" x="3" y="3" rx="2"/>'),
+  Play:         createIcon('<polygon points="6 3 20 12 6 21 6 3"/>'),
+  Clock:        createIcon('<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>'),
+  AlertCircle:  createIcon('<circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/>'),
+  Calendar:     createIcon('<rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/>'),
+  PieChart:     createIcon('<path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/>'),
+  TrendingUp:   createIcon('<polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/>'),
+  Key:          createIcon('<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/>'),
+  Eye:          createIcon('<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>'),
+  EyeOff:       createIcon('<path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/>'),
+  ExternalLink: createIcon('<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" x2="21" y1="14" y2="3"/>'),
+  Shield:       createIcon('<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>'),
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// UTILITIES
+// ═══════════════════════════════════════════════════════════════════════════════
+const formatTo12Hour = (time) => {
+  if (!time) return '';
+  const [hours, minutes] = time.split(':').map(Number);
+  const period = hours >= 12 ? 'PM' : 'AM';
+  const h = hours % 12 || 12;
+  return `${h}:${String(minutes).padStart(2, '0')} ${period}`;
+};
+
+const getLocalISO = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// GEMINI API SERVICE  (direct REST — no SDK needed)
+// ═══════════════════════════════════════════════════════════════════════════════
+const generateSchedule = async (rawInput, apiKey) => {
+  if (!apiKey || !apiKey.trim()) {
+    throw new Error('No API key found. Please add your Gemini API key in Settings (⚙).');
+  }
+
+  const localISO = getLocalISO();
+  const todayStr = new Date().toLocaleDateString('en-US', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
+
+  const systemInstruction = `You are an elite productivity coach. Take a raw brain dump of tasks and organize them into a "Billionaire's Schedule".
+
+Current Date: ${todayStr} (${localISO}).
+
+Rules:
+1. Time Blocking: Group similar tasks.
+2. Energy Management: High-cognitive tasks (Deep Work) in the morning.
+3. Breaks: Include strategic recovery breaks.
+4. Realism: Don't overbook. Fill until ~18:00–20:00.
+5. Subtasks: ONLY generate them if the user explicitly says "sub task", "steps", or lists bullet details. Otherwise subtasks = [].
+6. Date Detection: If user says "tomorrow" calculate it. Default = today (${localISO}).
+7. If no times mentioned, start at 08:00.
+
+Respond ONLY with valid JSON — no markdown, no prose:
+{
+  "date": "YYYY-MM-DD",
+  "schedule": [{
+    "startTime": "HH:MM",
+    "endTime": "HH:MM",
+    "activity": "string",
+    "category": "Deep Work"|"Health"|"Admin"|"Meeting"|"Break",
+    "energyRequired": "High"|"Medium"|"Low",
+    "notes": "short motivational tip",
+    "subtasks": [{"title":"string"}]
+  }]
+}`;
+
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey.trim()}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: systemInstruction }] },
+        contents: [{ role: 'user', parts: [{ text: rawInput }] }],
+        generation_config: { response_mime_type: 'application/json', temperature: 0.7 }
+      })
+    }
+  );
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    const msg = err?.error?.message || `HTTP ${res.status}`;
+    if (res.status === 400 && msg.toLowerCase().includes('api key')) throw new Error('Invalid API key. Please check your key in Settings.');
+    if (res.status === 429) throw new Error('Rate limit hit. Please wait a moment and try again.');
+    throw new Error(`API error: ${msg}`);
+  }
+
+  const data = await res.json();
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) return { schedule: [], planDate: localISO };
+
+  const parsed = JSON.parse(text.replace(/```json|```/g, '').trim());
+  const schedule = (parsed.schedule || []).map(item => ({
+    ...item,
+    id: crypto.randomUUID(),
+    completed: false,
+    subtasks: (item.subtasks || []).map(st => ({ id: crypto.randomUUID(), title: st.title, completed: false }))
+  }));
+
+  return { schedule, planDate: parsed.date || localISO };
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SETTINGS MODAL
+// ═══════════════════════════════════════════════════════════════════════════════
+function SettingsModal({ isOpen, onClose, apiKey, onSave }) {
+  const [localKey, setLocalKey] = useState('');
+  const [showKey, setShowKey] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => { if (isOpen) { setLocalKey(apiKey); setSaved(false); } }, [isOpen, apiKey]);
+  if (!isOpen) return null;
+
+  const handleSave = () => {
+    onSave(localKey.trim());
+    setSaved(true);
+    setTimeout(onClose, 600);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-sm animate-fade-in">
+      <div className="bg-charcoal border border-white/10 w-full max-w-lg rounded-t-2xl sm:rounded-2xl shadow-2xl overflow-hidden animate-slide-up">
+        {/* Header */}
+        <div className="flex items-center justify-between p-5 border-b border-white/5 bg-obsidian/50">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-amber-500/10 rounded-lg">
+              <Icons.Settings className="w-5 h-5 text-amber-400" />
+            </div>
+            <h3 className="text-xl font-serif font-bold text-white">Settings</h3>
+          </div>
+          <button onClick={onClose} className="text-mist hover:text-white transition-colors p-1">
+            <Icons.X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="p-6 space-y-5">
+          {/* API Key Field */}
+          <div className="space-y-2">
+            <label className="flex items-center gap-2 text-xs uppercase tracking-wider text-mist font-semibold">
+              <Icons.Key className="w-3.5 h-3.5" /> Gemini API Key
+            </label>
+            <div className="relative">
+              <input
+                type={showKey ? 'text' : 'password'}
+                value={localKey}
+                onChange={e => setLocalKey(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleSave()}
+                placeholder="AIzaSy..."
+                className="w-full bg-obsidian border border-white/10 rounded-xl p-3.5 pr-12 text-white font-mono text-sm focus:border-amber-500/50 focus:outline-none transition-colors placeholder-gray-600"
+              />
+              <button
+                type="button"
+                onClick={() => setShowKey(!showKey)}
+                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-mist hover:text-white transition-colors"
+              >
+                {showKey ? <Icons.EyeOff className="w-4 h-4" /> : <Icons.Eye className="w-4 h-4" />}
+              </button>
+            </div>
+            <p className="text-xs text-gray-500">
+              Get a free key at{' '}
+              <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener"
+                className="text-amber-400 hover:text-amber-300 inline-flex items-center gap-1 underline decoration-amber-500/30">
+                Google AI Studio <Icons.ExternalLink className="w-3 h-3" />
+              </a>
+            </p>
+          </div>
+
+          {/* Security note */}
+          <div className="flex gap-3 p-4 bg-white/3 border border-white/8 rounded-xl">
+            <Icons.Shield className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+            <p className="text-xs text-gray-400 leading-relaxed">
+              Your API key is stored <strong className="text-gray-300">only in your browser's localStorage</strong> on this device. It is never uploaded to any server — all AI requests go directly from your browser to Google's API.
+            </p>
+          </div>
+
+          {/* Status */}
+          {localKey && (
+            <div className="flex items-center gap-2 text-xs text-emerald-400">
+              <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></div>
+              Key detected ({localKey.slice(0,8)}…)
+            </div>
+          )}
+
+          {/* Buttons */}
+          <div className="flex gap-3 pt-1">
+            <button onClick={onClose}
+              className="flex-1 py-3 rounded-xl border border-white/10 text-mist hover:text-white hover:border-white/20 transition-all font-medium text-sm">
+              Cancel
+            </button>
+            <button onClick={handleSave}
+              className={`flex-[2] py-3 rounded-xl font-bold text-sm transition-all ${saved ? 'bg-emerald-500 text-white' : 'bg-amber-500 hover:bg-amber-400 text-obsidian'}`}>
+              {saved ? '✓ Saved!' : 'Save API Key'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// BRAIN DUMP
+// ═══════════════════════════════════════════════════════════════════════════════
+function BrainDump({ value, onChange, onGenerate, isLoading, hasExistingSchedule, onCancel, onOpenSettings, apiKey }) {
+  const hasKey = !!apiKey;
+  const canGenerate = value.trim() && !isLoading && hasKey;
+
+  return (
+    <div className="flex flex-col h-full animate-fade-in max-w-2xl mx-auto w-full p-6">
+      <div className="mb-6">
+        {hasExistingSchedule && (
+          <button onClick={onCancel} className="flex items-center text-mist hover:text-white text-sm mb-4 transition-colors group">
+            <Icons.ArrowLeft className="w-4 h-4 mr-1 group-hover:-translate-x-1 transition-transform" />
+            Back to Schedule
+          </button>
+        )}
+        <h2 className="text-3xl font-serif font-bold text-white mb-2">Design Your Day</h2>
+        <p className="text-mist text-sm">Empty your mind. What needs to happen today? We'll structure it for peak performance.</p>
+
+        {!hasKey && (
+          <button onClick={onOpenSettings}
+            className="mt-3 w-full flex items-center gap-3 p-3.5 bg-amber-500/8 border border-amber-500/25 rounded-xl text-left hover:border-amber-500/40 transition-colors group">
+            <Icons.Key className="w-4 h-4 text-amber-400 shrink-0" />
+            <span className="text-xs text-amber-300 flex-grow">No API key set — tap to add your Gemini key and start generating</span>
+            <Icons.ArrowRight className="w-4 h-4 text-amber-400 group-hover:translate-x-1 transition-transform" />
+          </button>
+        )}
+      </div>
+
+      <div className="flex-grow relative group" style={{ minHeight: '200px' }}>
+        <div className="absolute -inset-0.5 bg-gradient-to-r from-gray-700 to-gray-800 rounded-2xl blur opacity-25 group-hover:opacity-40 transition duration-700 pointer-events-none"></div>
+        <textarea
+          className="relative w-full h-full bg-charcoal text-white p-6 rounded-2xl border border-white/5 focus:border-white/10 resize-none text-base leading-relaxed placeholder-gray-600 outline-none shadow-2xl"
+          placeholder="e.g., Gym at 7am, deep work on Q3 strategy, lunch with Sarah at 1pm, review marketing materials, meditate..."
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          disabled={isLoading}
+        />
+      </div>
+
+      <div className="mt-6">
+        <button
+          onClick={onGenerate}
+          disabled={!canGenerate}
+          className={`w-full flex items-center justify-center gap-3 py-4 rounded-full font-semibold text-lg transition-all duration-300
+            ${canGenerate
+              ? 'bg-white text-obsidian hover:bg-gray-100 shadow-[0_0_25px_rgba(255,255,255,0.25)] hover:shadow-[0_0_35px_rgba(255,255,255,0.35)] transform hover:-translate-y-0.5'
+              : 'bg-gray-800 text-gray-500 cursor-not-allowed'}`}
+        >
+          {isLoading
+            ? <><Icons.Sparkles className="animate-spin h-5 w-5" /><span>Architecting Schedule...</span></>
+            : <><span>Architect My Day</span><Icons.ArrowRight className="h-5 w-5" /></>}
+        </button>
+        {!hasKey && (
+          <p className="text-center text-xs text-gray-600 mt-2">Add your API key above to enable schedule generation</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// EDIT TASK MODAL
+// ═══════════════════════════════════════════════════════════════════════════════
+function EditTaskModal({ task, isOpen, onClose, onSave, onDelete }) {
+  const [et, setEt] = useState(null);
+  const [newSub, setNewSub] = useState('');
+
+  useEffect(() => {
+    if (task) setEt({ ...task, subtasks: task.subtasks || [] });
+    else setEt(null);
+  }, [task]);
+
+  if (!isOpen || !et) return null;
+
+  const change = (f, v) => setEt(p => ({ ...p, [f]: v }));
+
+  const addSub = () => {
+    if (!newSub.trim()) return;
+    change('subtasks', [...(et.subtasks||[]), { id: crypto.randomUUID(), title: newSub.trim(), completed: false }]);
+    setNewSub('');
+  };
+
+  const toggleSub = id => change('subtasks', et.subtasks.map(s => s.id === id ? {...s, completed: !s.completed} : s));
+  const deleteSub = id => change('subtasks', et.subtasks.filter(s => s.id !== id));
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-sm animate-fade-in">
+      <div className="bg-charcoal border border-white/10 w-full max-w-lg rounded-t-2xl sm:rounded-2xl shadow-2xl overflow-hidden animate-slide-up flex flex-col max-h-[90vh]">
+        <div className="flex items-center justify-between p-5 border-b border-white/5 bg-obsidian/50 shrink-0">
+          <h3 className="text-xl font-serif font-bold text-white">Edit Task</h3>
+          <button onClick={onClose} className="text-mist hover:text-white transition-colors"><Icons.X className="w-5 h-5" /></button>
+        </div>
+        <form onSubmit={e => { e.preventDefault(); onSave(et); }} className="p-5 overflow-y-auto space-y-4">
+          <div className="space-y-1.5">
+            <label className="text-xs uppercase tracking-wider text-mist font-semibold">Activity</label>
+            <input type="text" value={et.activity} onChange={e => change('activity', e.target.value)}
+              className="w-full bg-obsidian border border-white/10 rounded-lg p-3 text-white focus:border-amber-500/50 focus:outline-none text-sm" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            {[['Start Time','startTime'],['End Time','endTime']].map(([label, field]) => (
+              <div key={field} className="space-y-1.5">
+                <label className="text-xs uppercase tracking-wider text-mist font-semibold">{label}</label>
+                <input type="time" value={et[field]} onChange={e => change(field, e.target.value)}
+                  className="w-full bg-obsidian border border-white/10 rounded-lg p-3 text-white focus:border-amber-500/50 focus:outline-none text-sm" />
+              </div>
+            ))}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <label className="text-xs uppercase tracking-wider text-mist font-semibold">Category</label>
+              <select value={et.category} onChange={e => change('category', e.target.value)}
+                className="w-full bg-obsidian border border-white/10 rounded-lg p-3 text-white focus:border-amber-500/50 focus:outline-none appearance-none text-sm">
+                {['Deep Work','Meeting','Admin','Health','Break'].map(c => <option key={c}>{c}</option>)}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs uppercase tracking-wider text-mist font-semibold">Energy</label>
+              <select value={et.energyRequired} onChange={e => change('energyRequired', e.target.value)}
+                className="w-full bg-obsidian border border-white/10 rounded-lg p-3 text-white focus:border-amber-500/50 focus:outline-none appearance-none text-sm">
+                {['High','Medium','Low'].map(l => <option key={l}>{l}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs uppercase tracking-wider text-mist font-semibold">Notes</label>
+            <textarea value={et.notes||''} onChange={e => change('notes', e.target.value)}
+              className="w-full bg-obsidian border border-white/10 rounded-lg p-3 text-white focus:border-amber-500/50 focus:outline-none min-h-[70px] text-sm" placeholder="Add details..." />
+          </div>
+          {/* Subtasks */}
+          <div className="space-y-2 pt-1">
+            <label className="text-xs uppercase tracking-wider text-mist font-semibold">Subtasks</label>
+            <div className="space-y-1">
+              {et.subtasks.map(st => (
+                <div key={st.id} className="flex items-center gap-2 group py-0.5">
+                  <button type="button" onClick={() => toggleSub(st.id)} className="text-gray-400 hover:text-amber-400 transition-colors">
+                    {st.completed ? <Icons.CheckSquare className="w-4 h-4 text-amber-500" /> : <Icons.Square className="w-4 h-4" />}
+                  </button>
+                  <input type="text" value={st.title}
+                    onChange={e => change('subtasks', et.subtasks.map(s => s.id===st.id ? {...s,title:e.target.value} : s))}
+                    className={`flex-grow bg-transparent border-none focus:ring-0 p-0 text-sm ${st.completed ? 'text-gray-500 line-through' : 'text-white'}`} />
+                  <button type="button" onClick={() => deleteSub(st.id)}
+                    className="opacity-0 group-hover:opacity-100 text-red-400/70 hover:text-red-400 transition-all p-1">
+                    <Icons.Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center gap-2">
+              <input type="text" value={newSub} onChange={e => setNewSub(e.target.value)}
+                onKeyDown={e => e.key==='Enter' && (e.preventDefault(), addSub())}
+                placeholder="Add a subtask..." className="flex-grow bg-obsidian border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-amber-500/50 focus:outline-none" />
+              <button type="button" onClick={addSub} className="p-2 bg-white/5 hover:bg-white/10 rounded-lg text-white transition-colors"><Icons.Plus className="w-4 h-4" /></button>
+            </div>
+          </div>
+          {/* Actions */}
+          <div className="flex gap-3 pt-3">
+            <button type="button" onClick={() => onDelete(et.id)}
+              className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border border-red-500/25 text-red-400 hover:bg-red-500/10 transition-colors font-medium text-sm">
+              <Icons.Trash2 className="w-4 h-4" /> Delete
+            </button>
+            <button type="submit"
+              className="flex-[2] flex items-center justify-center gap-2 py-3 rounded-xl bg-amber-500 text-obsidian hover:bg-amber-400 transition-colors font-bold text-sm">
+              <Icons.Save className="w-4 h-4" /> Save Changes
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SCHEDULE VIEW
+// ═══════════════════════════════════════════════════════════════════════════════
+const CATEGORY_ICONS = {
+  'Deep Work': <Icons.Zap className="h-3.5 w-3.5 text-amber-300" />,
+  'Health':    <Icons.Battery className="h-3.5 w-3.5 text-emerald-400" />,
+  'Break':     <Icons.Coffee className="h-3.5 w-3.5 text-blue-300" />,
+  'Meeting':   <Icons.Users className="h-3.5 w-3.5 text-purple-300" />,
+};
+const ENERGY_COLORS = {
+  'High':   'bg-amber-500/10 text-amber-400 border-amber-500/20',
+  'Medium': 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+  'Low':    'bg-gray-500/10 text-gray-400 border-gray-500/20',
+};
+
+function ScheduleView({ schedule, planDate, onReset, onUpdateTask, onDeleteTask, onAddTask }) {
+  const [editing, setEditing] = useState(null);
+
+  const headerTitle = () => {
+    const iso = getLocalISO();
+    if (planDate === iso) return "Today's Blueprint";
+    const [py,pm,pd] = planDate.split('-').map(Number);
+    const d = new Date(py, pm-1, pd);
+    const tmr = new Date(); tmr.setDate(tmr.getDate()+1);
+    if (d.toDateString() === tmr.toDateString()) return "Tomorrow's Blueprint";
+    return `Blueprint — ${d.toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' })}`;
+  };
+
+  return (
+    <div className="flex flex-col h-full animate-slide-up max-w-2xl mx-auto w-full relative">
+      {/* Sticky header */}
+      <div className="flex items-center justify-between px-4 py-3 md:px-6 md:py-4 border-b border-white/5 bg-obsidian/95 backdrop-blur-md sticky top-0 z-20">
+        <div>
+          <h2 className="text-xl font-serif font-bold text-white">{headerTitle()}</h2>
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <Icons.CalendarDays className="w-3 h-3 text-mist" />
+            <p className="text-[10px] text-mist uppercase tracking-widest">{planDate}</p>
+          </div>
+        </div>
+        <button onClick={onReset} className="text-xs text-mist hover:text-white transition-colors underline decoration-white/20 hover:decoration-white">
+          New Plan
+        </button>
+      </div>
+
+      {/* Task list */}
+      <div className="flex-grow overflow-y-auto p-3 md:p-4 space-y-3 pb-32">
+        {schedule.length === 0 ? (
+          <div className="text-center py-20 text-mist">
+            <p>No tasks scheduled.</p>
+            <button onClick={onAddTask} className="mt-4 text-amber-400 font-semibold text-sm">+ Add your first task</button>
+          </div>
+        ) : schedule.map((item, i) => {
+          const done = item.completed;
+          const subTotal = item.subtasks?.length || 0;
+          const subDone = item.subtasks?.filter(s => s.completed).length || 0;
+          return (
+            <div key={item.id} onClick={() => setEditing(item)}
+              style={{ animationDelay: `${i * 40}ms` }}
+              className={`relative flex gap-3 p-3 md:p-4 rounded-xl border transition-all duration-200 cursor-pointer
+                ${done ? 'bg-charcoal/25 border-white/5 opacity-55' : 'bg-charcoal/50 border-white/5 hover:bg-charcoal hover:border-white/10 shadow-black/20 shadow-lg'}`}>
+              {/* Time column */}
+              <div className="flex flex-col items-center min-w-[60px] pt-0.5">
+                <span className={`text-xs font-semibold whitespace-nowrap ${done ? 'text-mist line-through' : 'text-white'}`}>{formatTo12Hour(item.startTime)}</span>
+                <div className={`w-px flex-grow my-1 ${done ? 'bg-white/5' : 'bg-gradient-to-b from-white/15 to-transparent'}`}></div>
+                <span className="text-[10px] text-mist opacity-60 whitespace-nowrap">{formatTo12Hour(item.endTime)}</span>
+              </div>
+              {/* Content */}
+              <div className="flex-grow min-w-0">
+                <h3 className={`text-base font-medium truncate pr-8 ${done ? 'text-mist line-through' : 'text-white'}`}>{item.activity}</h3>
+                <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] uppercase tracking-wide border ${ENERGY_COLORS[item.energyRequired] || ENERGY_COLORS.Low}`}>{item.energyRequired}</span>
+                  <span className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/5 text-[10px] text-mist">
+                    {CATEGORY_ICONS[item.category] || <Icons.Briefcase className="h-3.5 w-3.5 text-gray-400" />}
+                    <span>{item.category}</span>
+                  </span>
+                  {subTotal > 0 && (
+                    <span className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/5 text-[10px] text-mist">
+                      <Icons.ListChecks className="w-3 h-3" />{subDone}/{subTotal}
+                    </span>
+                  )}
+                </div>
+                {item.notes && <p className={`text-xs mt-1.5 truncate ${done ? 'text-gray-600' : 'text-gray-500'}`}>{item.notes}</p>}
+              </div>
+              {/* Checkbox */}
+              <button onClick={e => { e.stopPropagation(); onUpdateTask({ ...item, completed: !done }); }}
+                className="absolute right-3 top-3 p-1 text-gray-500 hover:text-amber-400 transition-colors z-10">
+                {done
+                  ? <Icons.CheckCircle2 className="w-6 h-6 text-emerald-500" />
+                  : <Icons.Circle className="w-6 h-6 text-gray-600" />}
+              </button>
+            </div>
+          );
+        })}
+        <div className="py-6 flex justify-center opacity-30"><div className="w-12 h-0.5 bg-white/20 rounded-full"></div></div>
+      </div>
+
+      {/* FAB */}
+      <div className="absolute bottom-20 right-4 md:right-6 z-30">
+        <button onClick={onAddTask}
+          className="bg-amber-500 hover:bg-amber-400 text-obsidian rounded-full p-3.5 shadow-[0_0_28px_rgba(251,191,36,0.35)] transition-all transform hover:scale-105 active:scale-95 flex items-center justify-center">
+          <Icons.Plus className="w-6 h-6" />
+        </button>
+      </div>
+
+      <EditTaskModal task={editing} isOpen={!!editing} onClose={() => setEditing(null)}
+        onSave={t => { onUpdateTask(t); setEditing(null); }}
+        onDelete={id => { onDeleteTask(id); setEditing(null); }} />
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// FOCUS MODE
+// ═══════════════════════════════════════════════════════════════════════════════
+function FocusMode({ schedule, planDate, onUpdateTask }) {
+  const [now, setNow] = useState(new Date());
+  useEffect(() => { const t = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(t); }, []);
+
+  const isToday = planDate === getLocalISO();
+
+  if (!isToday) {
+    const [py,pm,pd] = planDate.split('-').map(Number);
+    const formatted = new Date(py, pm-1, pd).toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' });
+    return (
+      <div className="flex flex-col h-full p-6 max-w-2xl mx-auto w-full items-center justify-center text-center animate-fade-in">
+        <div className="w-20 h-20 bg-charcoal/50 rounded-full flex items-center justify-center mb-5 border border-white/5 relative">
+          <div className="absolute inset-0 bg-amber-500/10 blur-xl rounded-full"></div>
+          <Icons.Calendar className="w-9 h-9 text-mist relative z-10" />
+        </div>
+        <h2 className="text-2xl font-bold text-white mb-2">Scheduled for Future</h2>
+        <p className="text-mist max-w-xs leading-relaxed text-sm">
+          This blueprint is for <span className="text-amber-400 font-semibold">{formatted}</span>. Focus Mode activates automatically on that day.
+        </p>
+        <div className="mt-8 p-4 bg-charcoal/30 rounded-xl border border-white/5 w-full max-w-sm">
+          <p className="text-xs text-mist uppercase tracking-widest mb-3">Preview</p>
+          <div className="space-y-2 text-left opacity-60">
+            {schedule.slice(0,3).map(t => (
+              <div key={t.id} className="flex gap-3 text-sm">
+                <span className="text-gray-500 font-mono text-xs pt-0.5">{t.startTime}</span>
+                <span className="text-gray-300 truncate">{t.activity}</span>
+              </div>
+            ))}
+            {schedule.length > 3 && <p className="text-xs text-center pt-1 text-gray-600 italic">+{schedule.length-3} more</p>}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const sorted = [...schedule].sort((a,b) => {
+    const [ah,am] = a.startTime.split(':').map(Number);
+    const [bh,bm] = b.startTime.split(':').map(Number);
+    return (ah*60+am)-(bh*60+bm);
+  });
+  const cur = now.getHours()*60+now.getMinutes();
+
+  const overdueTask = sorted.find(t => {
+    const [eh,em] = t.endTime.split(':').map(Number);
+    return !t.completed && (eh*60+em) <= cur;
+  });
+  const nowTask = !overdueTask ? sorted.find(t => {
+    const [sh,sm] = t.startTime.split(':').map(Number);
+    const [eh,em] = t.endTime.split(':').map(Number);
+    return cur >= sh*60+sm && cur < eh*60+em;
+  }) : null;
+
+  const currentTask = overdueTask || nowTask;
+  const isOverdue = !!overdueTask;
+  const nextTask = sorted.find(t => { const [sh,sm] = t.startTime.split(':').map(Number); return sh*60+sm > cur; });
+
+  const progress = (() => {
+    if (!currentTask || isOverdue) return isOverdue ? 100 : 0;
+    const [sh,sm] = currentTask.startTime.split(':').map(Number);
+    const [eh,em] = currentTask.endTime.split(':').map(Number);
+    return Math.min(100, Math.max(0, ((cur-(sh*60+sm))/((eh*60+em)-(sh*60+sm)))*100));
+  })();
+
+  const toggleSub = id => {
+    if (!currentTask) return;
+    onUpdateTask({ ...currentTask, subtasks: currentTask.subtasks?.map(s => s.id===id ? {...s,completed:!s.completed} : s) });
+  };
+
+  const accent = isOverdue ? 'text-red-500' : 'text-amber-500';
+  const accentBorder = isOverdue ? 'border-red-500/20' : 'border-amber-500/20';
+  const halo = isOverdue ? 'bg-red-500/8' : 'bg-amber-500/5';
+
+  return (
+    <div className="flex flex-col h-full animate-fade-in p-6 max-w-2xl mx-auto w-full overflow-y-auto">
+      <div className="text-center mb-8 shrink-0">
+        <h2 className="text-xl font-serif font-bold text-white">Deep Focus</h2>
+        <p className="text-xs text-mist uppercase tracking-widest mt-1">
+          {now.toLocaleTimeString([], { hour:'numeric', minute:'2-digit', second:'2-digit' })}
+        </p>
+      </div>
+
+      <div className="flex-grow flex flex-col items-center relative">
+        <div className={`absolute inset-0 blur-[100px] rounded-full animate-pulse pointer-events-none ${halo}`}></div>
+
+        {currentTask ? (
+          <div className="relative z-10 text-center w-full max-w-lg">
+            {/* Progress ring */}
+            <div className={`mb-6 inline-flex items-center justify-center w-32 h-32 rounded-full border-4 bg-charcoal/50 relative ${accentBorder}`}>
+              <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 100 100">
+                <circle cx="50" cy="50" r="46" fill="none" stroke="currentColor" strokeWidth="8"
+                  className={accent} strokeDasharray="289.02"
+                  strokeDashoffset={289.02 * (1 - progress/100)} strokeLinecap="round" />
+              </svg>
+              {isOverdue
+                ? <Icons.AlertCircle className={`w-10 h-10 ${accent}`} />
+                : <Icons.Play className={`w-10 h-10 ${accent}`} />}
+            </div>
+
+            <div className="space-y-3">
+              <span className={`px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider border
+                ${isOverdue ? 'bg-red-500/10 text-red-400 border-red-500/20' : 'bg-amber-500/10 text-amber-400 border-amber-500/20'}`}>
+                {isOverdue ? '⚠ Overdue' : 'Current Task'}
+              </span>
+              <h1 className="text-3xl md:text-4xl font-bold text-white leading-tight">{currentTask.activity}</h1>
+              <div className="flex items-center justify-center gap-2 text-mist text-sm">
+                <Icons.Clock className="w-4 h-4" />
+                {formatTo12Hour(currentTask.startTime)} – {formatTo12Hour(currentTask.endTime)}
+              </div>
+              {currentTask.notes && <p className="text-gray-400 italic text-sm max-w-md mx-auto">"{currentTask.notes}"</p>}
+
+              {/* Subtasks */}
+              {currentTask.subtasks && currentTask.subtasks.length > 0 && (
+                <div className="mt-6 bg-charcoal/50 rounded-xl border border-white/5 p-4 text-left">
+                  <h4 className="text-xs uppercase tracking-wider text-mist mb-3 font-semibold">Subtasks</h4>
+                  <div className="space-y-1">
+                    {currentTask.subtasks.map(st => (
+                      <button key={st.id} onClick={() => toggleSub(st.id)}
+                        className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 transition-colors text-left">
+                        {st.completed
+                          ? <Icons.CheckSquare className="w-5 h-5 text-amber-500 shrink-0" />
+                          : <Icons.Square className="w-5 h-5 text-gray-500 shrink-0" />}
+                        <span className={`text-sm ${st.completed ? 'text-gray-500 line-through' : 'text-white'}`}>{st.title}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="pt-6 pb-10">
+                {!currentTask.completed ? (
+                  <button onClick={() => onUpdateTask({...currentTask, completed:true})}
+                    className="flex items-center gap-2 px-8 py-3 bg-white text-obsidian rounded-full font-bold hover:bg-gray-100 transition-all transform hover:scale-105 shadow-[0_0_20px_rgba(255,255,255,0.2)] mx-auto">
+                    <Icons.CheckCircle2 className="w-5 h-5" /> Mark Complete
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-2 justify-center text-emerald-400 font-bold text-lg">
+                    <Icons.CheckCircle2 className="w-6 h-6" /> Completed
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="text-center z-10">
+            <div className="w-24 h-24 bg-charcoal rounded-full flex items-center justify-center mx-auto mb-6 border border-white/10">
+              <Icons.Coffee className="w-10 h-10 text-blue-300" />
+            </div>
+            <h2 className="text-2xl font-bold text-white mb-2">Between Blocks</h2>
+            <p className="text-mist text-sm">No active task right now. Rest or prepare for what's next.</p>
+            {nextTask && (
+              <div className="mt-8 p-4 bg-charcoal/40 rounded-xl border border-white/5 inline-block">
+                <p className="text-xs text-mist uppercase tracking-wide mb-1">Up Next at {formatTo12Hour(nextTask.startTime)}</p>
+                <p className="text-white font-semibold">{nextTask.activity}</p>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+      <div className="h-20 shrink-0"></div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// STATS VIEW
+// ═══════════════════════════════════════════════════════════════════════════════
+function StatsView({ schedule }) {
+  const dur = (s,e) => { const [sh,sm]=s.split(':').map(Number); const [eh,em]=e.split(':').map(Number); return (eh*60+em)-(sh*60+sm); };
+  const total = schedule.length;
+  const done = schedule.filter(t=>t.completed).length;
+  const rate = total > 0 ? Math.round((done/total)*100) : 0;
+  const catStats = schedule.reduce((a,t) => { a[t.category]=(a[t.category]||0)+dur(t.startTime,t.endTime); return a; }, {});
+  const totalMin = Object.values(catStats).reduce((s,v)=>s+v,0);
+  const CAT_COLORS = { 'Deep Work':'bg-amber-500','Health':'bg-emerald-500','Admin':'bg-purple-500','Meeting':'bg-blue-500','Break':'bg-gray-500' };
+
+  return (
+    <div className="flex flex-col h-full animate-slide-up p-5 max-w-2xl mx-auto w-full overflow-y-auto pb-32">
+      <div className="flex items-center justify-between mb-6 border-b border-white/5 pb-5">
+        <div>
+          <h2 className="text-2xl font-serif font-bold text-white">Daily Analytics</h2>
+          <p className="text-xs text-mist uppercase tracking-widest mt-0.5">Performance Review</p>
+        </div>
+        <Icons.TrendingUp className="w-6 h-6 text-amber-400" />
+      </div>
+
+      {/* Completion hero */}
+      <div className="bg-charcoal/50 border border-white/5 rounded-2xl p-6 mb-5 text-center relative overflow-hidden">
+        <div className={`absolute inset-0 opacity-10 ${rate===100 ? 'bg-emerald-500' : 'bg-amber-500'}`}></div>
+        <p className="text-mist text-xs font-medium uppercase tracking-wider mb-2">Completion Rate</p>
+        <div className="flex items-end justify-center gap-1">
+          <span className="text-6xl font-bold text-white">{rate}</span>
+          <span className="text-2xl text-mist mb-2">%</span>
+        </div>
+        <div className="w-full bg-gray-800 h-2 rounded-full mt-4 overflow-hidden">
+          <div className={`h-full transition-all duration-1000 ${rate===100 ? 'bg-emerald-500' : 'bg-amber-500'}`} style={{width:`${rate}%`}}></div>
+        </div>
+      </div>
+
+      {/* Grid */}
+      <div className="grid grid-cols-2 gap-3 mb-6">
+        <div className="bg-charcoal border border-white/5 rounded-xl p-4 flex flex-col items-center">
+          <Icons.CheckCircle2 className="w-6 h-6 text-emerald-400 mb-2" />
+          <span className="text-2xl font-bold text-white">{done}/{total}</span>
+          <span className="text-xs text-mist mt-0.5">Tasks Done</span>
+        </div>
+        <div className="bg-charcoal border border-white/5 rounded-xl p-4 flex flex-col items-center">
+          <Icons.PieChart className="w-6 h-6 text-blue-400 mb-2" />
+          <span className="text-2xl font-bold text-white">{Math.round(totalMin/60*10)/10}h</span>
+          <span className="text-xs text-mist mt-0.5">Total Planned</span>
+        </div>
+      </div>
+
+      {/* Category bars */}
+      <h3 className="text-base font-bold text-white mb-3">Time Distribution</h3>
+      <div className="space-y-3">
+        {Object.entries(catStats).sort(([,a],[,b])=>b-a).map(([cat,mins]) => {
+          const pct = totalMin > 0 ? Math.round((mins/totalMin)*100) : 0;
+          return (
+            <div key={cat}>
+              <div className="flex justify-between items-center mb-1">
+                <span className="text-sm text-gray-300">{cat}</span>
+                <span className="text-xs text-mist">{mins}m ({pct}%)</span>
+              </div>
+              <div className="w-full bg-gray-800 h-1.5 rounded-full overflow-hidden">
+                <div className={`h-full ${CAT_COLORS[cat]||'bg-gray-500'}`} style={{width:`${pct}%`,transition:'width 0.8s ease'}}></div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {total === 0 && <p className="text-center text-mist text-sm mt-10">Generate a schedule to see analytics.</p>}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ROOT APP
+// ═══════════════════════════════════════════════════════════════════════════════
+function App() {
+  // API key — stored separately so it survives schedule resets
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem(API_KEY_STORAGE) || '');
+  const [showSettings, setShowSettings] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const saveApiKey = useCallback((key) => {
+    setApiKey(key);
+    try { localStorage.setItem(API_KEY_STORAGE, key); } catch(e) {}
+  }, []);
+
+  // App state
+  const [state, setState] = useState(() => {
+    const iso = getLocalISO();
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const p = JSON.parse(raw);
+        const sched = p.schedule || [];
+        let mode = AppMode.BRAIN_DUMP;
+        if (sched.length > 0) {
+          mode = AppMode.SCHEDULE;
+          if ((p.planDate||iso) === iso) {
+            const c = new Date().getHours()*60+new Date().getMinutes();
+            const active = sched.some(t => {
+              const [sh,sm]=t.startTime.split(':').map(Number);
+              const [eh,em]=t.endTime.split(':').map(Number);
+              return c>=sh*60+sm && c<eh*60+em;
+            });
+            if (active) mode = AppMode.FOCUS;
+          }
+        }
+        return { ...p, schedule: sched, mode, error: null, planDate: p.planDate||iso };
+      }
+    } catch(e) {}
+    return { rawInput:'', schedule:[], mode: AppMode.BRAIN_DUMP, error:null, planDate: iso };
+  });
+
+  // Persist
+  useEffect(() => {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch(e) {}
+  }, [state]);
+
+  const set = (patch) => setState(prev => ({ ...prev, ...patch }));
+  const switchMode = (mode) => set({ mode });
+
+  const handleGenerate = async () => {
+    setIsLoading(true);
+    set({ error: null });
+    try {
+      const { schedule, planDate } = await generateSchedule(state.rawInput, apiKey);
+      set({ schedule, planDate, mode: AppMode.SCHEDULE });
+    } catch(err) {
+      set({ error: err.message || 'Failed to generate schedule. Please try again.' });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const updateTask = (t) => setState(prev => ({ ...prev, schedule: prev.schedule.map(s => s.id===t.id ? t : s) }));
+  const deleteTask = (id) => setState(prev => ({ ...prev, schedule: prev.schedule.filter(t => t.id!==id) }));
+  const addTask = () => setState(prev => ({
+    ...prev,
+    schedule: [...prev.schedule, { id:crypto.randomUUID(), startTime:'09:00', endTime:'10:00', activity:'New Task', category:'Deep Work', energyRequired:'Medium', notes:'', completed:false, subtasks:[] }]
+  }));
+
+  const isBrainDump = state.mode === AppMode.BRAIN_DUMP;
+
+  return (
+    <div className="min-h-screen bg-obsidian text-slate-200 font-sans selection:bg-amber-500/30 selection:text-amber-200 overflow-hidden">
+      {/* Background mesh */}
+      <div className="fixed inset-0 z-0 pointer-events-none">
+        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-purple-900/10 rounded-full blur-[120px] opacity-30"></div>
+        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-amber-900/10 rounded-full blur-[120px] opacity-20"></div>
+      </div>
+
+      <main className="relative z-10 h-screen flex flex-col">
+        {/* Header (brain dump only) */}
+        {isBrainDump && (
+          <header className="flex items-center justify-between px-6 py-5 md:px-8 md:py-7 shrink-0">
+            <div className="flex items-center gap-2.5">
+              <Icons.Box className="w-6 h-6 text-white" />
+              <span className="font-serif font-bold text-xl tracking-tight text-white">Chronos</span>
+              <span className="text-xs text-mist/60 ml-1 hidden sm:inline">Elite</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <button onClick={() => setShowSettings(true)}
+                className="text-mist hover:text-white transition-colors p-1.5 rounded-lg hover:bg-white/5">
+                <Icons.Settings className="w-5 h-5" />
+              </button>
+              <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse"></div>
+            </div>
+          </header>
+        )}
+
+        {/* Error banner */}
+        {state.error && (
+          <div className="mx-5 mt-3 p-3.5 bg-red-900/20 border border-red-500/30 text-red-200 rounded-xl text-sm text-center shrink-0">
+            {state.error}
+            {state.error.includes('API key') && (
+              <button onClick={() => setShowSettings(true)} className="block mt-1 text-xs text-red-300 underline mx-auto">Open Settings</button>
+            )}
+          </div>
+        )}
+
+        {/* Content */}
+        <div className="flex-grow flex flex-col overflow-hidden">
+          {state.mode === AppMode.BRAIN_DUMP && (
+            <BrainDump
+              value={state.rawInput}
+              onChange={v => set({ rawInput: v })}
+              onGenerate={handleGenerate}
+              isLoading={isLoading}
+              hasExistingSchedule={state.schedule.length > 0}
+              onCancel={() => set({ mode: AppMode.SCHEDULE })}
+              onOpenSettings={() => setShowSettings(true)}
+              apiKey={apiKey}
+            />
+          )}
+          {state.mode === AppMode.SCHEDULE && (
+            <ScheduleView schedule={state.schedule} planDate={state.planDate}
+              onReset={() => set({ mode: AppMode.BRAIN_DUMP })}
+              onUpdateTask={updateTask} onDeleteTask={deleteTask} onAddTask={addTask} />
+          )}
+          {state.mode === AppMode.FOCUS && (
+            <FocusMode schedule={state.schedule} planDate={state.planDate} onUpdateTask={updateTask} />
+          )}
+          {state.mode === AppMode.STATS && (
+            <StatsView schedule={state.schedule} />
+          )}
+        </div>
+
+        {/* Bottom Nav */}
+        {!isBrainDump && (
+          <nav className="border-t border-white/5 bg-charcoal/90 backdrop-blur-xl pt-3 pb-5 px-6 shrink-0 sticky bottom-0 z-20">
+            <div className="flex justify-around items-center max-w-md mx-auto">
+              {[
+                { mode: AppMode.SCHEDULE, Icon: Icons.Layers,     label: 'Plan'     },
+                { mode: AppMode.FOCUS,    Icon: Icons.PlayCircle,  label: 'Focus'    },
+                { mode: AppMode.STATS,    Icon: Icons.BarChart3,   label: 'Stats'    },
+              ].map(({ mode, Icon, label }) => (
+                <button key={mode} onClick={() => switchMode(mode)}
+                  className={`flex flex-col items-center gap-1 transition-colors px-3 ${state.mode===mode ? 'text-amber-400' : 'text-gray-500 hover:text-white'}`}>
+                  <Icon className="w-5 h-5" />
+                  <span className="text-[10px] uppercase tracking-wider font-semibold">{label}</span>
+                </button>
+              ))}
+              <button onClick={() => setShowSettings(true)}
+                className="flex flex-col items-center gap-1 transition-colors px-3 text-gray-500 hover:text-white">
+                <Icons.Settings className="w-5 h-5" />
+                <span className="text-[10px] uppercase tracking-wider font-semibold">Settings</span>
+              </button>
+            </div>
+          </nav>
+        )}
+      </main>
+
+      <SettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} apiKey={apiKey} onSave={saveApiKey} />
+    </div>
+  );
+}
+
+// Mount
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
