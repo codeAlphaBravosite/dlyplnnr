@@ -1,0 +1,1573 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <!-- FIX #4: Removed user-scalable=no and maximum-scale=1.0 — accessibility violation -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chronos Elite | Master Your Day</title>
+
+  <!-- PWA Meta Tags -->
+  <meta name="theme-color" content="#09090b">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Chronos Elite">
+  <link rel="manifest" id="pwa-manifest">
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Inter','sans-serif'], serif: ['Playfair Display','serif'] },
+          colors: { obsidian: '#09090b', charcoal: '#18181b', gold: '#fbbf24', mist: '#a1a1aa' },
+          animation: { 'fade-in': 'fadeIn 0.5s ease-out', 'slide-up': 'slideUp 0.4s ease-out' },
+          keyframes: {
+            fadeIn:  { '0%': { opacity: '0' }, '100%': { opacity: '1' } },
+            slideUp: { '0%': { transform: 'translateY(20px)', opacity: '0' }, '100%': { transform: 'translateY(0)', opacity: '1' } }
+          }
+        }
+      }
+    };
+
+    // FIX #3: iOS-compatible PWA icons via Canvas (PNG) instead of SVG
+    function generatePWAIcon(size) {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = size; canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        const r = size * 0.17;
+        ctx.fillStyle = '#09090b';
+        ctx.beginPath();
+        if (ctx.roundRect) { ctx.roundRect(0, 0, size, size, r); } else {
+          ctx.moveTo(r,0); ctx.lineTo(size-r,0); ctx.quadraticCurveTo(size,0,size,r);
+          ctx.lineTo(size,size-r); ctx.quadraticCurveTo(size,size,size-r,size);
+          ctx.lineTo(r,size); ctx.quadraticCurveTo(0,size,0,size-r);
+          ctx.lineTo(0,r); ctx.quadraticCurveTo(0,0,r,0); ctx.closePath();
+        }
+        ctx.fill();
+        ctx.fillStyle = '#fbbf24';
+        ctx.font = `bold ${Math.round(size*0.62)}px Georgia, serif`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('C', size/2, size/2 + size*0.04);
+        return canvas.toDataURL('image/png');
+      } catch(e) { return ''; }
+    }
+
+    const icon192 = generatePWAIcon(192);
+    const icon512 = generatePWAIcon(512);
+    const manifest = {
+      name: "Chronos Elite", short_name: "Chronos",
+      description: "AI-powered daily planner for high-performers",
+      start_url: "./", display: "standalone",
+      background_color: "#09090b", theme_color: "#09090b",
+      icons: [
+        { src: icon192, sizes: "192x192", type: "image/png" },
+        { src: icon512, sizes: "512x512", type: "image/png" }
+      ]
+    };
+    const manifestBlob = new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' });
+    document.getElementById('pwa-manifest').href = URL.createObjectURL(manifestBlob);
+
+    // FIX #1: Blob-URL Service Workers cannot intercept page requests (wrong scope).
+    // For full offline PWA support, deploy a separate sw.js file from your server root.
+    // Core schedule data is fully offline-capable via localStorage.
+  </script>
+
+  <style>
+    body { background-color: #09090b; color: #f4f4f5; -webkit-font-smoothing: antialiased; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #09090b; }
+    ::-webkit-scrollbar-thumb { background: #27272a; border-radius: 3px; }
+    input[type="time"]::-webkit-calendar-picker-indicator { filter: invert(1); }
+
+    /* FIX #8: Safe area insets for iPhone notch + home indicator + Android nav bar */
+    .pb-safe { padding-bottom: max(1.25rem, env(safe-area-inset-bottom)); }
+    .pt-safe { padding-top: max(0px, env(safe-area-inset-top)); }
+    /* Task list: clears bottom nav (64px) + FAB (56px) + gap + safe area */
+    .scroll-area { padding-bottom: max(8.5rem, calc(8.5rem + env(safe-area-inset-bottom))); }
+    /* Line clamp utilities */
+    .clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .clamp-1 { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+
+    /* Proper focus rings for keyboard/accessibility — FIX #11 */
+    .focus-ring:focus-visible { outline: 2px solid #f59e0b; outline-offset: 2px; border-radius: 6px; }
+
+    /* Spinner */
+    @keyframes rotate { to { transform: rotate(360deg); } }
+    .spin { animation: rotate 0.75s linear infinite; }
+
+    /* Overlap pulse */
+    @keyframes overlapPulse { 0%,100%{opacity:1} 50%{opacity:0.6} }
+    .overlap-pulse { animation: overlapPulse 2s ease-in-out infinite; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useCallback } = React;
+
+const STORAGE_KEY     = 'chronos_elite_v3';
+const API_KEY_STORAGE = 'chronos_api_key';
+const HISTORY_KEY     = 'chronos_history_v1';
+
+const AppMode = { BRAIN_DUMP:'BRAIN_DUMP', SCHEDULE:'SCHEDULE', FOCUS:'FOCUS', STATS:'STATS', HISTORY:'HISTORY' };
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ICON SYSTEM
+// ═══════════════════════════════════════════════════════════════════════════════
+function Icon({ d, className="w-5 h-5" }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+      className={`inline-block shrink-0 ${className}`} dangerouslySetInnerHTML={{ __html: d }} />
+  );
+}
+const I = {
+  ArrowR:    '<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
+  ArrowL:    '<path d="M19 12H5"/><path d="m12 19-7-7 7-7"/>',
+  Box:       '<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.29 7 12 12 20.71 7"/><line x1="12" x2="12" y1="22" y2="12"/>',
+  Layers:    '<path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"/><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"/><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"/>',
+  PlayCirc:  '<circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/>',
+  BarChart:  '<path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/>',
+  Settings:  '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>',
+  Battery:   '<rect width="16" height="10" x="2" y="7" rx="2"/><line x1="22" x2="22" y1="11" y2="13"/>',
+  Briefcase: '<rect width="20" height="14" x="2" y="7" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>',
+  Coffee:    '<path d="M17 8h1a4 4 0 1 1 0 8h-1"/><path d="M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Z"/><line x1="6" x2="6" y1="2" y2="4"/><line x1="10" x2="10" y1="2" y2="4"/><line x1="14" x2="14" y1="2" y2="4"/>',
+  Users:     '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  Zap:       '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>',
+  Check2:    '<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>',
+  Circle:    '<circle cx="12" cy="12" r="10"/>',
+  Plus:      '<path d="M5 12h14"/><path d="M12 5v14"/>',
+  ListChk:   '<path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/>',
+  CalDays:   '<rect width="18" height="18" x="3" y="4" rx="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/><path d="M8 14h.01"/><path d="M12 14h.01"/><path d="M16 14h.01"/><path d="M8 18h.01"/><path d="M12 18h.01"/>',
+  X:         '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+  Trash:     '<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/>',
+  Save:      '<path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"/><path d="M7 3v4a1 1 0 0 0 1 1h7"/>',
+  CheckSq:   '<polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
+  Square:    '<rect width="18" height="18" x="3" y="3" rx="2"/>',
+  Play:      '<polygon points="6 3 20 12 6 21 6 3"/>',
+  Clock:     '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+  AlertC:    '<circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/>',
+  AlertT:    '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+  Calendar:  '<rect width="18" height="18" x="3" y="4" rx="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/>',
+  Pie:       '<path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/>',
+  Trend:     '<polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/>',
+  Key:       '<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/>',
+  Eye:       '<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>',
+  EyeOff:    '<path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/>',
+  ExtLink:   '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" x2="21" y1="14" y2="3"/>',
+  Shield:    '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+  Wand:      '<path d="m15 4-1 1"/><path d="m19 8-1 1"/><path d="M3 20 20 3"/><path d="m16 7-1.5-1.5"/><path d="m5 17-1.5-1.5"/><path d="m8 20-1-1"/><path d="m11 17 1-1"/><path d="M3 4h1"/><path d="M4 3v1"/><path d="m20 15-1 1"/><path d="m17 20 1-1"/><path d="m20 20-1-1"/>',
+  History:   '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>',
+  Bell:      '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
+  BellOff:   '<path d="M8.7 3A6 6 0 0 1 18 8a21.3 21.3 0 0 0 .6 5"/><path d="M17 17H3s3-2 3-9a4.67 4.67 0 0 1 .3-1.7"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/><path d="m2 2 20 20"/>',
+  ChevDown:  '<path d="m6 9 6 6 6-6"/>',
+};
+const Ic = (props) => <Icon d={I[props.n]} className={props.c || "w-5 h-5"} />;
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// UTILITIES
+// ═══════════════════════════════════════════════════════════════════════════════
+const fmt12 = (t) => {
+  if (!t) return '';
+  const [h, m] = t.split(':').map(Number);
+  return `${h%12||12}:${String(m).padStart(2,'0')} ${h>=12?'PM':'AM'}`;
+};
+
+const localISO = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+};
+
+const toMin = (t) => { const [h,m] = t.split(':').map(Number); return h*60+m; };
+
+// FIX #13: Overlap detection
+const findOverlaps = (schedule) => {
+  const ids = new Set();
+  for (let i = 0; i < schedule.length; i++) {
+    for (let j = i+1; j < schedule.length; j++) {
+      const a = schedule[i], b = schedule[j];
+      if (toMin(a.startTime) < toMin(b.endTime) && toMin(a.endTime) > toMin(b.startTime)) {
+        ids.add(a.id); ids.add(b.id);
+      }
+    }
+  }
+  return ids;
+};
+
+// FIX #15: Safe duration (no negative/NaN)
+const safeDur = (s, e) => Math.max(0, toMin(e) - toMin(s));
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SCHEDULE HISTORY — last 7 days
+// ═══════════════════════════════════════════════════════════════════════════════
+const saveHistory = (schedule, planDate) => {
+  try {
+    const h = JSON.parse(localStorage.getItem(HISTORY_KEY) || '{}');
+    h[planDate] = { schedule, savedAt: new Date().toISOString() };
+    const trimmed = {};
+    Object.keys(h).sort().reverse().slice(0,7).forEach(k => { trimmed[k] = h[k]; });
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(trimmed));
+  } catch(e) {}
+};
+
+const readHistory = () => {
+  try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '{}'); }
+  catch(e) { return {}; }
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// NOTIFICATION MANAGER
+// ═══════════════════════════════════════════════════════════════════════════════
+const notifTimers = [];
+
+const clearNotifs = () => { notifTimers.forEach(t => clearTimeout(t)); notifTimers.length = 0; };
+
+const scheduleNotifs = (schedule, planDate) => {
+  clearNotifs();
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  if (planDate !== localISO()) return;
+  const nowMs = Date.now();
+
+  schedule.forEach(task => {
+    if (task.completed) return;
+    const [h, m] = task.startTime.split(':').map(Number);
+    const startMs = new Date().setHours(h, m, 0, 0); // setHours returns a timestamp number
+    const warnMs  = startMs - 2 * 60 * 1000; // 2 min before
+
+    if (warnMs > nowMs) {
+      notifTimers.push(setTimeout(() => {
+        new Notification(`⏰ Up next: ${task.activity}`, {
+          body: `Starts in 2 min · ${fmt12(task.startTime)}`,
+          tag: `warn-${task.id}`, silent: false,
+        });
+      }, warnMs - nowMs));
+    }
+    if (startMs > nowMs) {
+      notifTimers.push(setTimeout(() => {
+        new Notification(`🚀 ${task.activity}`, {
+          body: `${fmt12(task.startTime)} → ${fmt12(task.endTime)} · ${task.energyRequired} energy`,
+          tag: `start-${task.id}`, silent: false,
+        });
+        if (navigator.vibrate) navigator.vibrate([80, 40, 80]);
+      }, startMs - nowMs));
+    }
+  });
+};
+
+const askNotifPermission = async () => {
+  if (!('Notification' in window)) return 'unsupported';
+  if (Notification.permission !== 'default') return Notification.permission;
+  return await Notification.requestPermission();
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// GEMINI API
+// ═══════════════════════════════════════════════════════════════════════════════
+const MODEL = 'gemini-3-flash-preview';
+
+const callGemini = async (systemInstruction, userText, apiKey, temp=0.7, _attempt=1) => {
+  let res;
+  try {
+    res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${apiKey.trim()}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: systemInstruction }] },
+          contents: [{ role: 'user', parts: [{ text: userText }] }],
+          generation_config: { response_mime_type: 'application/json', temperature: temp }
+        })
+      }
+    );
+  } catch(networkErr) {
+    // Network failure — retry once after 1.5s
+    if (_attempt < 2) {
+      await new Promise(r => setTimeout(r, 1500));
+      return callGemini(systemInstruction, userText, apiKey, temp, 2);
+    }
+    throw new Error('Network error. Check your connection and try again.');
+  }
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    const msg = err?.error?.message || `HTTP ${res.status}`;
+    if (res.status === 400 && msg.toLowerCase().includes('api key')) throw new Error('Invalid API key. Check Settings.');
+    if (res.status === 429) throw new Error('Rate limit hit. Wait a moment and try again.');
+    // Retry once on transient server errors (5xx)
+    if (res.status >= 500 && _attempt < 2) {
+      await new Promise(r => setTimeout(r, 1500));
+      return callGemini(systemInstruction, userText, apiKey, temp, 2);
+    }
+    throw new Error(`API error: ${msg}`);
+  }
+
+  const data = await res.json();
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) {
+    // Empty response — retry once
+    if (_attempt < 2) {
+      await new Promise(r => setTimeout(r, 1000));
+      return callGemini(systemInstruction, userText, apiKey, temp, 2);
+    }
+    throw new Error('Empty response from Gemini. Please try again.');
+  }
+
+  // Robust JSON cleanup (handles occasional markdown fences despite mime type)
+  try {
+    return JSON.parse(text.replace(/```[\w]*\n?/gi, '').replace(/```/g, '').trim());
+  } catch(parseErr) {
+    // JSON parse failed — retry once at lower temperature for stricter output
+    if (_attempt < 2) {
+      await new Promise(r => setTimeout(r, 800));
+      return callGemini(systemInstruction, userText, apiKey, Math.max(0.1, temp - 0.3), 2);
+    }
+    throw new Error('Could not parse AI response. Please try again.');
+  }
+};
+
+const generateSchedule = async (rawInput, apiKey) => {
+  if (!apiKey?.trim()) throw new Error('No API key. Add your Gemini key in Settings (⚙).');
+  const today = localISO();
+  const todayStr = new Date().toLocaleDateString('en-US', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
+
+  // Build tomorrow's ISO string for the prompt default
+  const tomorrowDate = new Date(); tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+  const tomorrow = `${tomorrowDate.getFullYear()}-${String(tomorrowDate.getMonth()+1).padStart(2,'0')}-${String(tomorrowDate.getDate()).padStart(2,'0')}`;
+
+  const sys = `You are an elite productivity coach. Turn a raw task brain dump into a structured, time-blocked daily schedule.
+
+Today is ${todayStr} (${today}). Tomorrow is ${tomorrow}.
+
+━━ SCHEDULING RULES ━━
+1. TIME BLOCKING: Group related tasks into focused blocks. Batch similar work together.
+2. ENERGY ARC: Schedule high-cognitive tasks (Deep Work) before 13:00. Admin, meetings, and routine tasks in the afternoon. Light tasks and breaks toward evening.
+3. BREAKS: Include at least one short Break block (15–30 min) per 3-hour work block. A lunch break if the schedule spans midday.
+4. REALISM: Do not overload. Max ~10 tasks. End the day by 21:00. ZERO time overlaps — every task must have a unique, non-overlapping window.
+5. GAPS: Tasks may have natural gaps between them. Do NOT force-fill every minute. A gap is fine — an overlap is never acceptable.
+6. DATE HANDLING:
+   - "today" → ${today}
+   - "tomorrow" → ${tomorrow}
+   - Named days ("Monday", "Friday", etc.) → calculate the next occurrence from today
+   - "next week" → next Monday (${(() => { const d = new Date(); const day = d.getDay(); const diff = (8 - day) % 7 || 7; d.setDate(d.getDate() + diff); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })()})
+   - If no date context is given at all → default to tomorrow (${tomorrow})
+   - Always output the resolved date as "date" in the JSON.
+7. START TIME: If the user gives no start times, begin the schedule at 08:00.
+8. SUBTASKS: Include subtasks ONLY when the user provides nested items (bullet points, dashes, numbered steps) under a task, OR explicitly uses words like "steps", "subtasks", "breakdown". For all other tasks, output subtasks as [].
+
+━━ NAMING RULES (critical) ━━
+- "activity": 2–4 words max. MUST start with an action verb.
+  ✓ GOOD: "Morning Workout", "Deep Work Sprint", "Team Standup", "Strategy Review", "Email Triage", "Lunch Break", "Read Industry News"
+  ✗ BAD: "High-Performance Morning Routine", "Strategic Recovery & Nourishment Block", "Focused Deep Work Session for Q3"
+- "notes": ONE practical, specific tip. Max 12 words. No fluff.
+  ✓ GOOD: "No phone for the first 90 minutes.", "Reply only to urgent emails.", "Eat protein before this session."
+  ✗ BAD: "Fuel your brain with high-omega-3 nutrition for peak cognitive output."
+
+━━ OUTPUT FORMAT ━━
+Respond ONLY with valid JSON. No markdown, no explanation, no code fences:
+{"date":"YYYY-MM-DD","schedule":[{"startTime":"HH:MM","endTime":"HH:MM","activity":"string","category":"Deep Work"|"Health"|"Admin"|"Meeting"|"Break","energyRequired":"High"|"Medium"|"Low","notes":"string","subtasks":[{"title":"string"}]}]}`;
+
+  const parsed = await callGemini(sys, rawInput.trim(), apiKey, 0.65);
+  const schedule = (parsed.schedule||[]).map(item => ({
+    ...item, id: crypto.randomUUID(), completed: false, skipped: false,
+    subtasks: (item.subtasks||[]).map(st => ({ id: crypto.randomUUID(), title: st.title, completed: false }))
+  }));
+  return { schedule, planDate: parsed.date || today };
+};
+
+const fixScheduleAI = async (schedule, planDate, apiKey) => {
+  if (!apiKey?.trim()) throw new Error('No API key. Add your Gemini key in Settings (⚙).');
+
+  const sys = `You are a schedule optimizer. Fix the provided schedule JSON:
+1. Resolve ALL time overlaps by adjusting start/end times.
+2. Fill dead-air gaps logically without adding new tasks.
+3. Maintain energy arc: high-cognitive morning, low-energy afternoon.
+4. Keep every task's id, activity name, category, energyRequired intact.
+5. Never add new tasks. Preserve original task count.
+Respond ONLY with JSON (no markdown):
+{"schedule":[{"id":"string","startTime":"HH:MM","endTime":"HH:MM","activity":"string","category":"string","energyRequired":"string","notes":"string","subtasks":[]}]}`;
+
+  const input = schedule.map(t => ({
+    id:t.id, startTime:t.startTime, endTime:t.endTime,
+    activity:t.activity, category:t.category, energyRequired:t.energyRequired, notes:t.notes, subtasks:[]
+  }));
+
+  const parsed = await callGemini(sys, `Fix this schedule for ${planDate}:\n${JSON.stringify(input,null,2)}`, apiKey, 0.3);
+  const fixedMap = {};
+  (parsed.schedule||[]).forEach(t => { fixedMap[t.id] = t; });
+
+  // Merge fixed times back, preserve completed/subtask state
+  return schedule.map(t => fixedMap[t.id]
+    ? { ...t, startTime: fixedMap[t.id].startTime, endTime: fixedMap[t.id].endTime, notes: fixedMap[t.id].notes || t.notes }
+    : t
+  );
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TOAST
+// ═══════════════════════════════════════════════════════════════════════════════
+function Toast({ msg, type, onDone }) {
+  useEffect(() => { const t = setTimeout(onDone, 3200); return () => clearTimeout(t); }, []);
+  const styles = {
+    success: 'bg-emerald-900/80 border-emerald-500/40 text-emerald-100',
+    error:   'bg-red-900/80 border-red-500/40 text-red-100',
+    info:    'bg-amber-900/80 border-amber-500/40 text-amber-100',
+  };
+  return (
+    <div className={`fixed top-5 left-1/2 -translate-x-1/2 z-[100] px-5 py-3 rounded-2xl border backdrop-blur-xl text-sm font-medium shadow-2xl animate-slide-up pointer-events-none max-w-xs w-[90vw] text-center ${styles[type]||styles.info}`}>
+      {msg}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SETTINGS MODAL
+// ═══════════════════════════════════════════════════════════════════════════════
+function SettingsModal({ open, onClose, apiKey, onSave, notifPerm, onReqNotif }) {
+  const [key, setKey] = useState('');
+  const [show, setShow] = useState(false);
+  const [saved, setSaved] = useState(false);
+  useEffect(() => { if (open) { setKey(apiKey); setSaved(false); } }, [open, apiKey]);
+  if (!open) return null;
+
+  const doSave = () => { onSave(key.trim()); setSaved(true); setTimeout(onClose, 700); };
+
+  const notifInfo = {
+    granted:     { label:'✓ Notifications On',     cls:'bg-emerald-500/10 text-emerald-400 border-emerald-500/20', icon:'Bell',   clickable:false },
+    denied:      { label:'Blocked by browser',      cls:'bg-red-500/10 text-red-400 border-red-500/20',           icon:'BellOff',clickable:false },
+    unsupported: { label:'Not supported on device', cls:'bg-gray-500/10 text-gray-400 border-gray-500/20',        icon:'BellOff',clickable:false },
+    default:     { label:'Enable Notifications',    cls:'bg-amber-500/10 text-amber-300 border-amber-500/25',     icon:'Bell',   clickable:true  },
+  };
+  const ni = notifInfo[notifPerm || 'default'];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-sm animate-fade-in">
+      <div className="bg-charcoal border border-white/10 w-full max-w-lg rounded-t-2xl sm:rounded-2xl shadow-2xl overflow-hidden animate-slide-up">
+        <div className="flex items-center justify-between p-5 border-b border-white/5 bg-obsidian/50">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-amber-500/10 rounded-lg"><Ic n="Settings" c="w-5 h-5 text-amber-400" /></div>
+            <h3 className="text-xl font-serif font-bold text-white">Settings</h3>
+          </div>
+          <button onClick={onClose} className="focus-ring text-mist hover:text-white transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg">
+            <Ic n="X" c="w-5 h-5" />
+          </button>
+        </div>
+        <div className="p-6 space-y-5">
+          {/* API Key */}
+          <div className="space-y-2">
+            <label className="flex items-center gap-2 text-xs uppercase tracking-wider text-mist font-semibold">
+              <Ic n="Key" c="w-3.5 h-3.5" /> Gemini API Key
+            </label>
+            <div className="relative">
+              <input type={show?'text':'password'} value={key} onChange={e=>setKey(e.target.value)}
+                onKeyDown={e=>e.key==='Enter'&&doSave()} placeholder="AIzaSy…"
+                className="focus-ring w-full bg-obsidian border border-white/10 rounded-xl p-3.5 pr-12 text-white font-mono text-sm focus:border-amber-500/50 focus:outline-none transition-colors placeholder-gray-600" />
+              <button type="button" onClick={()=>setShow(!show)}
+                className="focus-ring absolute right-0 top-0 h-full px-3.5 text-mist hover:text-white transition-colors flex items-center justify-center">
+                <Ic n={show?'EyeOff':'Eye'} c="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-xs text-gray-500">Free key at{' '}
+              <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener"
+                className="text-amber-400 hover:text-amber-300 inline-flex items-center gap-1 underline decoration-amber-500/30">
+                Google AI Studio <Ic n="ExtLink" c="w-3 h-3" />
+              </a>
+            </p>
+          </div>
+
+          {/* Notifications */}
+          <div className="space-y-2">
+            <label className="flex items-center gap-2 text-xs uppercase tracking-wider text-mist font-semibold">
+              <Ic n="Bell" c="w-3.5 h-3.5" /> Task Reminders
+            </label>
+            <button onClick={ni.clickable ? onReqNotif : undefined}
+              className={`focus-ring w-full flex items-center justify-between px-4 py-3 rounded-xl border transition-colors ${ni.cls} ${ni.clickable?'cursor-pointer hover:opacity-80':'cursor-default'}`}>
+              <span className="text-sm font-medium">{ni.label}</span>
+              <Ic n={ni.icon} c="w-4 h-4" />
+            </button>
+            {notifPerm==='granted' && <p className="text-xs text-emerald-400/70">You'll be notified 2 min before each task starts.</p>}
+            {notifPerm==='denied'  && <p className="text-xs text-red-400/70">Re-enable in your browser / device notification settings.</p>}
+          </div>
+
+          {/* Security note */}
+          <div className="flex gap-3 p-4 bg-white/3 border border-white/8 rounded-xl">
+            <Ic n="Shield" c="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+            <p className="text-xs text-gray-400 leading-relaxed">
+              Your API key is stored <strong className="text-gray-300">only in your browser's localStorage</strong> on this device. It is never sent to any server — all AI calls go directly from your browser to Google's API.
+            </p>
+          </div>
+
+          {key && (
+            <div className="flex items-center gap-2 text-xs text-emerald-400">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse inline-block"></span>
+              Key detected ({key.slice(0,8)}…)
+            </div>
+          )}
+
+          <div className="flex gap-3 pt-1">
+            <button onClick={onClose} className="focus-ring flex-1 py-3 rounded-xl border border-white/10 text-mist hover:text-white hover:border-white/20 transition-all font-medium text-sm">Cancel</button>
+            <button onClick={doSave}
+              className={`focus-ring flex-[2] py-3 rounded-xl font-bold text-sm transition-all ${saved?'bg-emerald-500 text-white':'bg-amber-500 hover:bg-amber-400 text-obsidian'}`}>
+              {saved ? '✓ Saved!' : 'Save API Key'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// BRAIN DUMP
+// ═══════════════════════════════════════════════════════════════════════════════
+function BrainDump({ value, onChange, onGenerate, loading, hasSchedule, onCancel, onOpenSettings, apiKey }) {
+  const hasKey = !!apiKey;
+  const canGen = value.trim().length > 3 && !loading && hasKey;
+  const MAX = 2000;
+  const pct = Math.min(value.length / MAX * 100, 100);
+  const ctrCls = pct > 90 ? 'text-red-400' : pct > 75 ? 'text-amber-400' : 'text-gray-600';
+
+  return (
+    <div className="flex flex-col h-full animate-fade-in max-w-2xl mx-auto w-full p-5">
+      <div className="mb-5">
+        {hasSchedule && (
+          <button onClick={onCancel} className="focus-ring flex items-center text-mist hover:text-white text-sm mb-4 transition-colors group min-h-[44px]">
+            <Ic n="ArrowL" c="w-4 h-4 mr-1 group-hover:-translate-x-1 transition-transform" /> Back to Schedule
+          </button>
+        )}
+        <h2 className="text-3xl font-serif font-bold text-white mb-1">Design Your Day</h2>
+        <p className="text-mist text-sm">Empty your mind. What needs to happen today? We'll structure it for peak performance.</p>
+        {!hasKey && (
+          <button onClick={onOpenSettings}
+            className="focus-ring mt-3 w-full flex items-center gap-3 p-3.5 bg-amber-500/8 border border-amber-500/25 rounded-xl text-left hover:border-amber-500/40 transition-colors group min-h-[52px]">
+            <Ic n="Key" c="w-4 h-4 text-amber-400 shrink-0" />
+            <span className="text-xs text-amber-300 flex-grow">No API key — tap to add your Gemini key and start</span>
+            <Ic n="ArrowR" c="w-4 h-4 text-amber-400 group-hover:translate-x-1 transition-transform" />
+          </button>
+        )}
+      </div>
+
+      <div className="flex-grow relative group" style={{minHeight:'180px'}}>
+        <div className="absolute -inset-0.5 bg-gradient-to-r from-gray-700 to-gray-800 rounded-2xl blur opacity-20 group-hover:opacity-35 transition duration-700 pointer-events-none"></div>
+        <textarea
+          className="focus-ring relative w-full h-full bg-charcoal text-white p-5 rounded-2xl border border-white/5 focus:border-white/10 resize-none text-base leading-relaxed placeholder-gray-600 outline-none shadow-2xl"
+          placeholder="Brain dump anything — times, tasks, meetings, goals. Examples:&#10;&#10;• Gym at 7am&#10;• Deep work on Q3 strategy (90 min)&#10;• Lunch with Sarah at 1pm&#10;• Review marketing deck - cover slide, charts, CTA&#10;• Call accountant re: taxes&#10;• Meditate 20 min&#10;• Tomorrow: client proposal, team standup 10am, wrap by 5pm"
+          value={value} onChange={e => onChange(e.target.value.slice(0, MAX))} disabled={loading} />
+      </div>
+
+      {/* FIX #16: Character counter */}
+      <div className="flex justify-end mt-1.5 mb-3">
+        <span className={`text-xs font-mono transition-colors ${ctrCls}`}>{value.length}/{MAX}</span>
+      </div>
+
+      <button onClick={onGenerate} disabled={!canGen}
+        className={`focus-ring w-full flex items-center justify-center gap-3 py-4 rounded-full font-semibold text-lg transition-all duration-300 min-h-[56px]
+          ${canGen
+            ? 'bg-white text-obsidian hover:bg-gray-100 shadow-[0_0_25px_rgba(255,255,255,0.22)] hover:shadow-[0_0_35px_rgba(255,255,255,0.32)] transform hover:-translate-y-0.5'
+            : 'bg-gray-800 text-gray-500 cursor-not-allowed'}`}>
+        {loading ? (
+          <>
+            {/* FIX #17: proper spinner — not a spinning star icon */}
+            <svg className="spin w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <path d="M12 2v4" strokeLinecap="round" opacity="1"/>
+              <path d="M12 18v4" strokeLinecap="round" opacity="0.3"/>
+              <path d="m4.93 4.93 2.83 2.83" strokeLinecap="round" opacity="0.9"/>
+              <path d="m16.24 16.24 2.83 2.83" strokeLinecap="round" opacity="0.2"/>
+              <path d="M2 12h4" strokeLinecap="round" opacity="0.7"/>
+              <path d="M18 12h4" strokeLinecap="round" opacity="0.1"/>
+              <path d="m4.93 19.07 2.83-2.83" strokeLinecap="round" opacity="0.5"/>
+              <path d="m16.24 7.76 2.83-2.83" strokeLinecap="round" opacity="0.05"/>
+            </svg>
+            <span>Architecting Schedule…</span>
+          </>
+        ) : (
+          <><span>Architect My Day</span><Ic n="ArrowR" c="h-5 w-5" /></>
+        )}
+      </button>
+      {!hasKey && <p className="text-center text-xs text-gray-600 mt-2">Add your API key above to enable schedule generation</p>}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// EDIT TASK MODAL
+// ═══════════════════════════════════════════════════════════════════════════════
+function EditTaskModal({ task, open, onClose, onSave, onDelete }) {
+  const [et, setEt] = useState(null);
+  const [newSub, setNewSub] = useState('');
+  const [timeErr, setTimeErr] = useState('');
+
+  useEffect(() => {
+    if (task) { setEt({ ...task, subtasks: task.subtasks||[] }); setTimeErr(''); }
+    else setEt(null);
+  }, [task]);
+
+  if (!open || !et) return null;
+
+  const ch = (f, v) => { setEt(p => ({...p, [f]:v})); if (f==='startTime'||f==='endTime') setTimeErr(''); };
+
+  const doSave = () => {
+    // FIX #6: End-before-start validation
+    if (et.endTime <= et.startTime) { setTimeErr('End time must be after start time.'); return; }
+    onSave(et);
+  };
+
+  const addSub = () => {
+    if (!newSub.trim()) return;
+    ch('subtasks', [...(et.subtasks||[]), { id:crypto.randomUUID(), title:newSub.trim(), completed:false }]);
+    setNewSub('');
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-sm animate-fade-in">
+      <div className="bg-charcoal border border-white/10 w-full max-w-lg rounded-t-2xl sm:rounded-2xl shadow-2xl overflow-hidden animate-slide-up flex flex-col max-h-[92vh]">
+        <div className="flex items-center justify-between p-5 border-b border-white/5 bg-obsidian/50 shrink-0">
+          <h3 className="text-xl font-serif font-bold text-white">Edit Task</h3>
+          <button onClick={onClose} className="focus-ring text-mist hover:text-white min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg transition-colors">
+            <Ic n="X" c="w-5 h-5" />
+          </button>
+        </div>
+        <div className="p-5 overflow-y-auto space-y-4">
+          <div className="space-y-1.5">
+            <label className="text-xs uppercase tracking-wider text-mist font-semibold">Activity</label>
+            <input type="text" value={et.activity} onChange={e=>ch('activity',e.target.value)}
+              className="focus-ring w-full bg-obsidian border border-white/10 rounded-lg p-3 text-white focus:border-amber-500/50 focus:outline-none text-sm" />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            {[['Start Time','startTime'],['End Time','endTime']].map(([lbl,f]) => (
+              <div key={f} className="space-y-1.5">
+                <label className="text-xs uppercase tracking-wider text-mist font-semibold">{lbl}</label>
+                <input type="time" value={et[f]} onChange={e=>ch(f,e.target.value)}
+                  className="focus-ring w-full bg-obsidian border border-white/10 rounded-lg p-3 text-white focus:border-amber-500/50 focus:outline-none text-sm" />
+              </div>
+            ))}
+          </div>
+          {timeErr && (
+            <p className="text-xs text-red-400 flex items-center gap-1.5">
+              <Ic n="AlertC" c="w-3.5 h-3.5 shrink-0" />{timeErr}
+            </p>
+          )}
+
+          {/* FIX #7: select dropdowns with visible chevron arrow */}
+          <div className="grid grid-cols-2 gap-3">
+            {[
+              { lbl:'Category', f:'category',      opts:['Deep Work','Meeting','Admin','Health','Break'] },
+              { lbl:'Energy',   f:'energyRequired', opts:['High','Medium','Low'] },
+            ].map(({ lbl, f, opts }) => (
+              <div key={f} className="space-y-1.5">
+                <label className="text-xs uppercase tracking-wider text-mist font-semibold">{lbl}</label>
+                <div className="relative">
+                  <select value={et[f]} onChange={e=>ch(f,e.target.value)}
+                    className="focus-ring w-full bg-obsidian border border-white/10 rounded-lg p-3 pr-8 text-white focus:border-amber-500/50 focus:outline-none appearance-none text-sm">
+                    {opts.map(o=><option key={o}>{o}</option>)}
+                  </select>
+                  <Ic n="ChevDown" c="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-mist pointer-events-none" />
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs uppercase tracking-wider text-mist font-semibold">Notes</label>
+            <textarea value={et.notes||''} onChange={e=>ch('notes',e.target.value)}
+              className="focus-ring w-full bg-obsidian border border-white/10 rounded-lg p-3 text-white focus:border-amber-500/50 focus:outline-none min-h-[68px] text-sm" placeholder="Add details…" />
+          </div>
+
+          {/* Subtasks */}
+          <div className="space-y-2 pt-1">
+            <label className="text-xs uppercase tracking-wider text-mist font-semibold">Subtasks</label>
+            <div className="space-y-1">
+              {et.subtasks.map(st => (
+                <div key={st.id} className="flex items-center gap-2 py-0.5">
+                  <button type="button" onClick={()=>ch('subtasks',et.subtasks.map(s=>s.id===st.id?{...s,completed:!s.completed}:s))}
+                    className="focus-ring min-w-[36px] min-h-[36px] flex items-center justify-center text-gray-400 hover:text-amber-400 transition-colors">
+                    <Ic n={st.completed?'CheckSq':'Square'} c={`w-4 h-4 ${st.completed?'text-amber-500':''}`} />
+                  </button>
+                  <input type="text" value={st.title}
+                    onChange={e=>ch('subtasks',et.subtasks.map(s=>s.id===st.id?{...s,title:e.target.value}:s))}
+                    className={`focus-ring flex-grow bg-transparent border-none p-0 text-sm outline-none ${st.completed?'text-gray-500 line-through':'text-white'}`} />
+                  {/* FIX #2: Always visible delete button (not hidden behind hover — useless on mobile) */}
+                  <button type="button" onClick={()=>ch('subtasks',et.subtasks.filter(s=>s.id!==st.id))}
+                    className="focus-ring min-w-[36px] min-h-[36px] flex items-center justify-center text-red-400/60 hover:text-red-400 transition-colors">
+                    <Ic n="Trash" c="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center gap-2">
+              <input type="text" value={newSub} onChange={e=>setNewSub(e.target.value)}
+                onKeyDown={e=>e.key==='Enter'&&(e.preventDefault(),addSub())}
+                placeholder="Add a subtask… (Enter to add)"
+                className="focus-ring flex-grow bg-obsidian border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-amber-500/50 focus:outline-none" />
+              <button type="button" onClick={addSub}
+                className="focus-ring p-2 bg-white/5 hover:bg-white/10 rounded-lg text-white transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center">
+                <Ic n="Plus" c="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          <div className="flex gap-3 pt-3">
+            <button type="button" onClick={()=>onDelete(et.id)}
+              className="focus-ring flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border border-red-500/25 text-red-400 hover:bg-red-500/10 transition-colors font-medium text-sm min-h-[52px]">
+              <Ic n="Trash" c="w-4 h-4" /> Delete
+            </button>
+            <button type="button" onClick={doSave}
+              className="focus-ring flex-[2] flex items-center justify-center gap-2 py-3 rounded-xl bg-amber-500 text-obsidian hover:bg-amber-400 transition-colors font-bold text-sm min-h-[52px]">
+              <Ic n="Save" c="w-4 h-4" /> Save Changes
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SCHEDULE VIEW
+// ═══════════════════════════════════════════════════════════════════════════════
+// FIX #10: Admin icon added to map
+const CAT_ICONS = {
+  'Deep Work': <Icon d={I.Zap}       className="h-3.5 w-3.5 text-amber-300" />,
+  'Health':    <Icon d={I.Battery}   className="h-3.5 w-3.5 text-emerald-400" />,
+  'Break':     <Icon d={I.Coffee}    className="h-3.5 w-3.5 text-blue-300" />,
+  'Meeting':   <Icon d={I.Users}     className="h-3.5 w-3.5 text-purple-300" />,
+  'Admin':     <Icon d={I.Briefcase} className="h-3.5 w-3.5 text-slate-400" />,
+};
+// Left border color strip for instant visual differentiation at a glance
+const CAT_BORDER = {
+  'Deep Work': '#f59e0b', // amber
+  'Health':    '#10b981', // emerald
+  'Break':     '#60a5fa', // blue
+  'Meeting':   '#a78bfa', // purple
+  'Admin':     '#94a3b8', // slate
+};
+const ENERGY_CLS = {
+  'High':   'bg-amber-500/10 text-amber-400 border-amber-500/20',
+  'Medium': 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+  'Low':    'bg-gray-500/10 text-gray-400 border-gray-500/20',
+};
+
+function ScheduleView({ schedule, planDate, onReset, onUpdate, onDelete, onAdd, onFix, fixing }) {
+  const [editing, setEditing] = useState(null);
+  const [resetTap, setResetTap] = useState(false);
+
+  // FIX #5: Always sort by start time (manual-added tasks appear in correct order)
+  const sorted = [...schedule].sort((a,b) => a.startTime.localeCompare(b.startTime));
+  const overlaps = findOverlaps(sorted);
+  const hasOverlaps = overlaps.size > 0;
+
+  const title = () => {
+    const t = localISO();
+    if (planDate === t) return "Today's Blueprint";
+    const [y,mo,d] = planDate.split('-').map(Number);
+    const dt = new Date(y,mo-1,d);
+    const tmr = new Date(); tmr.setDate(tmr.getDate()+1);
+    if (dt.toDateString()===tmr.toDateString()) return "Tomorrow's Blueprint";
+    return `Blueprint — ${dt.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})}`;
+  };
+
+  // FIX #9: Double-tap confirmation for "New Plan"
+  const handleReset = () => {
+    if (!resetTap) { setResetTap(true); setTimeout(()=>setResetTap(false), 2800); return; }
+    onReset(); setResetTap(false);
+  };
+
+  return (
+    <div className="flex flex-col h-full animate-slide-up max-w-2xl mx-auto w-full relative">
+      {/* Sticky header */}
+      <div className="flex items-center justify-between px-4 py-3 md:px-6 border-b border-white/5 bg-obsidian/95 backdrop-blur-md sticky top-0 z-20">
+        <div>
+          <h2 className="text-xl font-serif font-bold text-white">{title()}</h2>
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <Ic n="CalDays" c="w-3 h-3 text-mist" />
+            <p className="text-xs text-mist uppercase tracking-widest">{planDate}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {/* AI Fix Schedule button */}
+          <button onClick={onFix} disabled={fixing || schedule.length===0}
+            title={hasOverlaps ? 'Fix overlapping tasks with AI' : 'Optimize schedule with AI'}
+            className={`focus-ring flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all min-h-[40px]
+              ${hasOverlaps
+                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/35 hover:bg-amber-500/30 overlap-pulse'
+                : 'bg-white/5 text-mist border border-white/10 hover:bg-white/10 hover:text-white'}
+              ${fixing||schedule.length===0 ? 'opacity-50 cursor-not-allowed' : ''}`}>
+            {fixing
+              ? <svg className="spin w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4" strokeLinecap="round"/></svg>
+              : <Ic n="Wand" c="w-3.5 h-3.5" />}
+            {hasOverlaps ? 'Fix Overlaps' : 'AI Fix'}
+          </button>
+
+          {/* New Plan — double-tap confirm */}
+          <button onClick={handleReset}
+            className={`focus-ring text-xs transition-all underline min-h-[40px] px-2 rounded
+              ${resetTap ? 'text-red-400 font-bold no-underline bg-red-500/10 rounded-lg px-3' : 'text-mist hover:text-white decoration-white/20 hover:decoration-white'}`}>
+            {resetTap ? 'Tap to confirm' : 'New Plan'}
+          </button>
+        </div>
+      </div>
+
+      {/* Overlap warning banner */}
+      {hasOverlaps && (
+        <div className="mx-4 mt-3 p-3 bg-amber-900/20 border border-amber-500/30 rounded-xl flex items-center gap-2.5 shrink-0">
+          <Ic n="AlertT" c="w-4 h-4 text-amber-400 shrink-0" />
+          <p className="text-xs text-amber-200">
+            <strong>{overlaps.size} tasks overlap.</strong> Highlighted below — tap <strong>AI Fix</strong> to resolve automatically.
+          </p>
+        </div>
+      )}
+
+      {/* Task list */}
+      {/* scroll-area replaces mb-safe: clears nav + FAB + safe-area bottom */}
+      <div className="flex-grow overflow-y-auto p-3 md:p-4 space-y-2.5 scroll-area">
+        {sorted.length===0 ? (
+          <div className="text-center py-20 text-mist">
+            <p className="text-sm">No tasks scheduled.</p>
+            <button onClick={onAdd} className="focus-ring mt-4 text-amber-400 font-semibold text-sm min-h-[44px] px-4">+ Add your first task</button>
+          </div>
+        ) : sorted.map((item, i) => {
+          const done = item.completed;
+          const skipped = item.skipped;
+          const overlapping = overlaps.has(item.id) && !done && !skipped;
+          const subTotal = item.subtasks?.length || 0;
+          const subDone  = item.subtasks?.filter(s=>s.completed).length || 0;
+          const borderColor = CAT_BORDER[item.category] || '#4b5563';
+          const dur = safeDur(item.startTime, item.endTime);
+          const durLabel = dur >= 60 ? `${Math.floor(dur/60)}h${dur%60>0?` ${dur%60}m`:''}` : `${dur}m`;
+          return (
+            <div key={item.id} onClick={()=>setEditing(item)}
+              style={{animationDelay:`${i*35}ms`, borderLeftColor: borderColor}}
+              className={`relative flex gap-0 rounded-xl border border-l-4 transition-all duration-200 cursor-pointer overflow-hidden
+                ${overlapping
+                  ? 'bg-amber-900/15 border-amber-500/30 shadow-amber-900/20 shadow-lg'
+                  : done || skipped
+                  ? 'bg-charcoal/20 border-white/5 opacity-45'
+                  : 'bg-charcoal/60 border-white/8 hover:bg-charcoal hover:border-white/12 shadow-black/20 shadow-md'}`}>
+              {overlapping && (
+                <div className="absolute top-2.5 right-10 text-amber-400 z-10">
+                  <Ic n="AlertT" c="w-3.5 h-3.5" />
+                </div>
+              )}
+              {skipped && (
+                <div className="absolute top-2.5 left-[72px] z-10">
+                  <span className="text-[10px] uppercase tracking-wider bg-gray-700/60 text-gray-400 px-1.5 py-0.5 rounded-full font-semibold">Skipped</span>
+                </div>
+              )}
+
+              {/* Time column */}
+              <div className="flex flex-col items-center min-w-[64px] pt-3 pb-3 px-2 shrink-0">
+                <span className={`text-xs font-bold whitespace-nowrap ${done||skipped?'text-gray-600':'text-white'}`}>{fmt12(item.startTime)}</span>
+                <div className="flex flex-col items-center flex-grow my-1 w-full">
+                  <div className={`w-px flex-grow ${done||skipped?'bg-white/5':'bg-gradient-to-b from-white/20 to-transparent'}`}></div>
+                  <span className={`text-[9px] whitespace-nowrap font-semibold my-0.5 ${done||skipped?'text-gray-700':'text-mist/55'}`}>{durLabel}</span>
+                  <div className={`w-px flex-grow ${done||skipped?'bg-white/5':'bg-gradient-to-t from-white/20 to-transparent'}`}></div>
+                </div>
+                <span className={`text-[10px] whitespace-nowrap font-medium ${done||skipped?'text-gray-700':'text-mist/70'}`}>{fmt12(item.endTime)}</span>
+              </div>
+
+              {/* Divider */}
+              <div className="w-px bg-white/5 self-stretch shrink-0"></div>
+
+              {/* Content */}
+              <div className="flex-grow min-w-0 px-3 pt-3 pb-3 pr-12">
+                <h3 className={`text-sm font-semibold leading-snug clamp-2 ${done?'text-gray-500 line-through':skipped?'text-gray-600 line-through':'text-white'}`}>{item.activity}</h3>
+                {item.notes && !skipped && <p className={`text-xs mt-1 clamp-1 ${done?'text-gray-700':'text-gray-500'}`}>{item.notes}</p>}
+                <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                  <span className={`px-1.5 py-px rounded-full text-[10px] uppercase tracking-wide border font-semibold ${ENERGY_CLS[item.energyRequired]||ENERGY_CLS.Low}`}>{item.energyRequired}</span>
+                  <span className="flex items-center gap-1 px-1.5 py-px rounded-md bg-white/5 text-[10px] text-mist font-medium">
+                    {CAT_ICONS[item.category]||<Ic n="Briefcase" c="h-3 w-3 text-gray-400"/>}
+                    <span>{item.category}</span>
+                  </span>
+                  {subTotal>0 && (
+                    <span className="flex items-center gap-1 px-1.5 py-px rounded-md bg-white/5 text-[10px] text-mist">
+                      <Ic n="ListChk" c="w-3 h-3" />{subDone}/{subTotal}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Completion toggle */}
+              <button
+                onClick={e => {
+                  e.stopPropagation();
+                  onUpdate({ ...item, completed: !done, skipped: false });
+                  if (navigator.vibrate) navigator.vibrate(40);
+                }}
+                className="focus-ring absolute right-1 top-1/2 -translate-y-1/2 min-w-[44px] min-h-[44px] flex items-center justify-center transition-colors z-10">
+                <Ic n={done?'Check2':'Circle'} c={`w-6 h-6 ${done?'text-emerald-500':'text-gray-700'}`} />
+              </button>
+            </div>
+          );
+        })}
+        <div className="py-4 flex justify-center opacity-20"><div className="w-10 h-0.5 bg-white/30 rounded-full"></div></div>
+      </div>
+
+      {/* FAB — positioned above bottom nav with safe area */}
+      <div className="absolute bottom-[5.5rem] right-4 md:right-6 z-30" style={{bottom:`calc(5.5rem + env(safe-area-inset-bottom))`}}>
+        <button onClick={onAdd}
+          className="focus-ring bg-amber-500 hover:bg-amber-400 text-obsidian rounded-full shadow-[0_0_28px_rgba(251,191,36,0.4)] transition-all transform hover:scale-105 active:scale-95 flex items-center justify-center min-w-[56px] min-h-[56px]">
+          <Ic n="Plus" c="w-6 h-6" />
+        </button>
+      </div>
+
+      <EditTaskModal task={editing} open={!!editing} onClose={()=>setEditing(null)}
+        onSave={t=>{onUpdate(t);setEditing(null);}}
+        onDelete={id=>{onDelete(id);setEditing(null);}} />
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// RESCHEDULE MODAL
+// ═══════════════════════════════════════════════════════════════════════════════
+function RescheduleModal({ task, open, onClose, onReschedule }) {
+  const [custom, setCustom] = useState('');
+  const [err, setErr] = useState('');
+  useEffect(() => { if (open) { setCustom(''); setErr(''); } }, [open]);
+  if (!open || !task) return null;
+
+  const dur = safeDur(task.startTime, task.endTime);
+  const presets = [
+    { label: '+30 min',  mins: 30  },
+    { label: '+1 hour',  mins: 60  },
+    { label: '+2 hours', mins: 120 },
+    { label: '+3 hours', mins: 180 },
+  ];
+
+  const applyOffset = (offsetMins) => {
+    const newStart = toMin(task.startTime) + offsetMins;
+    if (newStart >= 24*60) { setErr('That time is past midnight.'); return; }
+    const newEnd = Math.min(newStart + dur, 24*60 - 1);
+    const fmt = (m) => `${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`;
+    onReschedule({ ...task, startTime: fmt(newStart), endTime: fmt(newEnd), skipped: false });
+  };
+
+  const applyCustom = () => {
+    if (!custom) { setErr('Pick a time first.'); return; }
+    const [h,m] = custom.split(':').map(Number);
+    const startMin = h*60+m;
+    if (startMin < toMin(task.startTime)) { setErr('New time must be in the future.'); return; }
+    const endMin = Math.min(startMin + dur, 24*60-1);
+    const fmt = (v) => `${String(Math.floor(v/60)).padStart(2,'0')}:${String(v%60).padStart(2,'0')}`;
+    onReschedule({ ...task, startTime: fmt(startMin), endTime: fmt(endMin), skipped: false });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-sm animate-fade-in">
+      <div className="bg-charcoal border border-white/10 w-full max-w-lg rounded-t-2xl sm:rounded-2xl shadow-2xl overflow-hidden animate-slide-up">
+        <div className="flex items-center justify-between p-5 border-b border-white/5 bg-obsidian/50 shrink-0">
+          <div>
+            <h3 className="text-lg font-serif font-bold text-white">Reschedule Task</h3>
+            <p className="text-xs text-mist mt-0.5 clamp-1">{task.activity}</p>
+          </div>
+          <button onClick={onClose} className="focus-ring min-w-[44px] min-h-[44px] flex items-center justify-center text-mist hover:text-white rounded-lg transition-colors">
+            <Ic n="X" c="w-5 h-5"/>
+          </button>
+        </div>
+        <div className="p-5 space-y-4">
+          <p className="text-xs text-mist">Push this task forward by:</p>
+          <div className="grid grid-cols-2 gap-2.5">
+            {presets.map(p => (
+              <button key={p.mins} onClick={() => applyOffset(p.mins)}
+                className="focus-ring py-3.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/8 hover:border-white/15 text-white font-semibold text-sm transition-all active:scale-95 min-h-[52px]">
+                {p.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="flex-1 relative">
+              <input type="time" value={custom} onChange={e=>{setCustom(e.target.value);setErr('');}}
+                className="focus-ring w-full bg-obsidian border border-white/10 rounded-xl p-3 text-white focus:border-amber-500/50 focus:outline-none text-sm" />
+            </div>
+            <button onClick={applyCustom}
+              className="focus-ring px-5 py-3 bg-amber-500 hover:bg-amber-400 text-obsidian rounded-xl font-bold text-sm transition-all min-h-[52px]">
+              Set
+            </button>
+          </div>
+          {err && <p className="text-xs text-red-400 flex items-center gap-1.5"><Ic n="AlertC" c="w-3.5 h-3.5 shrink-0"/>{err}</p>}
+          <button onClick={onClose}
+            className="focus-ring w-full py-3 rounded-xl border border-white/10 text-mist hover:text-white hover:border-white/20 font-medium text-sm transition-all min-h-[48px]">
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// FOCUS MODE
+// ═══════════════════════════════════════════════════════════════════════════════
+function FocusMode({ schedule, planDate, onUpdate }) {
+  const [now, setNow] = useState(new Date());
+  const [reschedTask, setReschedTask] = useState(null);
+  useEffect(() => { const t = setInterval(()=>setNow(new Date()), 1000); return ()=>clearInterval(t); }, []);
+
+  const isToday = planDate === localISO();
+
+  if (!isToday) {
+    const [y,mo,d] = planDate.split('-').map(Number);
+    const fmt = new Date(y,mo-1,d).toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'});
+    return (
+      <div className="flex flex-col h-full p-6 max-w-2xl mx-auto w-full items-center justify-center text-center animate-fade-in">
+        <div className="w-20 h-20 bg-charcoal/50 rounded-full flex items-center justify-center mb-5 border border-white/5 relative">
+          <div className="absolute inset-0 bg-amber-500/10 blur-xl rounded-full"></div>
+          <Ic n="Calendar" c="w-9 h-9 text-mist relative z-10" />
+        </div>
+        <h2 className="text-2xl font-bold text-white mb-2">Scheduled for Future</h2>
+        <p className="text-mist max-w-xs leading-relaxed text-sm">
+          Blueprint for <span className="text-amber-400 font-semibold">{fmt}</span>. Focus Mode activates on that day.
+        </p>
+        <div className="mt-8 p-4 bg-charcoal/30 rounded-xl border border-white/5 w-full max-w-sm text-left opacity-60">
+          {schedule.slice(0,3).map(t=>(
+            <div key={t.id} className="flex gap-3 text-sm py-1">
+              <span className="text-gray-500 font-mono text-xs pt-0.5 shrink-0">{t.startTime}</span>
+              <span className="text-gray-300 clamp-1">{t.activity}</span>
+            </div>
+          ))}
+          {schedule.length>3 && <p className="text-xs text-center pt-1 text-gray-600 italic">+{schedule.length-3} more</p>}
+        </div>
+      </div>
+    );
+  }
+
+  const sorted = [...schedule].sort((a,b)=>a.startTime.localeCompare(b.startTime));
+  const cur = now.getHours()*60+now.getMinutes();
+
+  const overdueList = sorted.filter(t => !t.completed && !t.skipped && toMin(t.endTime) <= cur);
+  // Active task is always found independently — not suppressed by overdue
+  const activeTask  = sorted.find(t => { const s=toMin(t.startTime),e=toMin(t.endTime); return !t.completed && !t.skipped && cur>=s && cur<e; });
+  const next        = sorted.find(t => toMin(t.startTime) > cur && !t.completed && !t.skipped);
+
+  // Hero: active task takes first priority; fallback to first overdue
+  const heroTask  = activeTask || overdueList[0] || null;
+  // isOverdue only true when hero IS an overdue task (no active task running)
+  const isOverdue = !activeTask && overdueList.length > 0;
+  // Overdue queue: if active task is hero show ALL overdue; otherwise show all except the hero
+  const overdueRest = activeTask ? overdueList : overdueList.slice(1);
+
+  const progress = (() => {
+    if (!heroTask || isOverdue) return isOverdue ? 100 : 0;
+    const s=toMin(heroTask.startTime), e=toMin(heroTask.endTime), total=e-s;
+    if (total<=0) return 0;
+    return Math.min(100,Math.max(0,((cur-s)/total)*100));
+  })();
+
+  const accent  = isOverdue ? 'text-red-500' : 'text-amber-500';
+  const aBorder = isOverdue ? 'border-red-500/25' : 'border-amber-500/25';
+  const halo    = isOverdue ? 'bg-red-500/8' : 'bg-amber-500/5';
+
+  const doComplete = (task) => {
+    onUpdate({...task, completed:true, skipped:false});
+    if (navigator.vibrate) navigator.vibrate([60,30,60]);
+  };
+  const doSkip = (task) => {
+    onUpdate({...task, skipped:true, completed:false});
+    if (navigator.vibrate) navigator.vibrate(30);
+  };
+  const doReschedule = (updated) => {
+    onUpdate(updated);
+    setReschedTask(null);
+  };
+
+  return (
+    <div className="flex flex-col h-full animate-fade-in max-w-2xl mx-auto w-full overflow-y-auto scroll-area">
+      {/* Header */}
+      <div className="text-center pt-6 pb-4 shrink-0 px-6">
+        <h2 className="text-xl font-serif font-bold text-white">Deep Focus</h2>
+        <p className="text-xs text-mist uppercase tracking-widest mt-1">{now.toLocaleTimeString([],{hour:'numeric',minute:'2-digit',second:'2-digit'})}</p>
+      </div>
+
+      {/* Overdue queue: all overdue tasks except the hero */}
+      {overdueRest.length > 0 && (
+        <div className="px-4 pb-3 shrink-0">
+          <p className="text-[10px] text-red-400/80 uppercase tracking-widest font-semibold mb-2 flex items-center gap-1.5">
+            <Ic n="AlertT" c="w-3 h-3"/> {overdueRest.length} {activeTask ? 'overdue' : 'more overdue'}
+          </p>
+          <div className="space-y-1.5">
+            {overdueRest.map(t => (
+              <div key={t.id} className="flex items-center gap-2 bg-red-900/10 border border-red-500/20 rounded-xl px-3 py-2">
+                <span className="text-xs text-red-300 font-semibold shrink-0">{fmt12(t.startTime)}</span>
+                <span className="text-xs text-gray-300 flex-grow clamp-1">{t.activity}</span>
+                <button onClick={()=>doComplete(t)}
+                  className="focus-ring shrink-0 text-[10px] text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 px-2 py-1 rounded-lg font-semibold transition-colors min-h-[30px]">Done</button>
+                <button onClick={()=>doSkip(t)}
+                  className="focus-ring shrink-0 text-[10px] text-gray-400 bg-white/5 hover:bg-white/10 px-2 py-1 rounded-lg font-semibold transition-colors min-h-[30px]">Skip</button>
+                <button onClick={()=>setReschedTask(t)}
+                  className="focus-ring shrink-0 text-[10px] text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 px-2 py-1 rounded-lg font-semibold transition-colors min-h-[30px]">Move</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Hero focus card */}
+      <div className="flex-grow flex flex-col items-center relative px-6">
+        <div className={`absolute inset-0 blur-[100px] rounded-full animate-pulse pointer-events-none ${halo}`}></div>
+
+        {heroTask ? (
+          <div className="relative z-10 text-center w-full max-w-lg pt-2">
+            {/* Progress ring */}
+            <div className={`mb-5 inline-flex items-center justify-center w-28 h-28 rounded-full border-4 bg-charcoal/50 relative ${aBorder}`}>
+              <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 100 100">
+                <circle cx="50" cy="50" r="46" fill="none" stroke="currentColor" strokeWidth="8"
+                  className={accent} strokeDasharray="289.02" strokeDashoffset={289.02*(1-progress/100)} strokeLinecap="round"/>
+              </svg>
+              {isOverdue ? <Ic n="AlertC" c={`w-9 h-9 ${accent}`}/> : <Ic n="Play" c={`w-9 h-9 ${accent}`}/>}
+            </div>
+
+            <div className="space-y-2">
+              <span className={`px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider border ${isOverdue?'bg-red-500/10 text-red-400 border-red-500/20':'bg-amber-500/10 text-amber-400 border-amber-500/20'}`}>
+                {isOverdue ? `⚠ Overdue · ${fmt12(heroTask.startTime)}` : 'Current Task'}
+              </span>
+              <h1 className="text-2xl md:text-3xl font-bold text-white leading-tight px-2">{heroTask.activity}</h1>
+              <div className="flex items-center justify-center gap-2 text-mist text-sm">
+                <Ic n="Clock" c="w-4 h-4" /> {fmt12(heroTask.startTime)} – {fmt12(heroTask.endTime)}
+              </div>
+              {heroTask.notes && <p className="text-gray-400 italic text-sm max-w-xs mx-auto clamp-2">"{heroTask.notes}"</p>}
+
+              {heroTask.subtasks?.length > 0 && (
+                <div className="mt-4 bg-charcoal/50 rounded-xl border border-white/5 p-4 text-left">
+                  <h4 className="text-xs uppercase tracking-wider text-mist mb-3 font-semibold">Subtasks</h4>
+                  <div className="space-y-1">
+                    {heroTask.subtasks.map(st=>(
+                      <button key={st.id}
+                        onClick={()=>onUpdate({...heroTask,subtasks:heroTask.subtasks.map(s=>s.id===st.id?{...s,completed:!s.completed}:s)})}
+                        className="focus-ring w-full flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 transition-colors text-left min-h-[44px]">
+                        <Ic n={st.completed?'CheckSq':'Square'} c={`w-5 h-5 ${st.completed?'text-amber-500':'text-gray-500'} shrink-0`}/>
+                        <span className={`text-sm ${st.completed?'text-gray-500 line-through':'text-white'}`}>{st.title}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Action buttons */}
+              <div className="pt-4 pb-6 space-y-3">
+                {!heroTask.completed ? (
+                  <button onClick={()=>doComplete(heroTask)}
+                    className="focus-ring flex items-center gap-2 px-8 py-3.5 bg-white text-obsidian rounded-full font-bold hover:bg-gray-100 transition-all transform hover:scale-105 shadow-[0_0_20px_rgba(255,255,255,0.2)] mx-auto min-h-[52px]">
+                    <Ic n="Check2" c="w-5 h-5" /> Mark Complete
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-2 justify-center text-emerald-400 font-bold text-lg">
+                    <Ic n="Check2" c="w-6 h-6" /> Completed
+                  </div>
+                )}
+
+                {/* Overdue-only actions: Skip or Reschedule */}
+                {isOverdue && !heroTask.completed && (
+                  <div className="flex items-center justify-center gap-3">
+                    <button onClick={()=>setReschedTask(heroTask)}
+                      className="focus-ring flex items-center gap-1.5 px-5 py-2.5 bg-amber-500/10 border border-amber-500/25 text-amber-300 rounded-full text-sm font-semibold hover:bg-amber-500/20 transition-all min-h-[44px]">
+                      <Ic n="Clock" c="w-4 h-4"/> Reschedule
+                    </button>
+                    <button onClick={()=>doSkip(heroTask)}
+                      className="focus-ring flex items-center gap-1.5 px-5 py-2.5 bg-white/5 border border-white/10 text-gray-400 rounded-full text-sm font-semibold hover:bg-white/10 transition-all min-h-[44px]">
+                      Skip
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="text-center z-10 pt-6">
+            <div className="w-24 h-24 bg-charcoal rounded-full flex items-center justify-center mx-auto mb-6 border border-white/10">
+              <Ic n="Coffee" c="w-10 h-10 text-blue-300"/>
+            </div>
+            <h2 className="text-2xl font-bold text-white mb-2">Between Blocks</h2>
+            <p className="text-mist text-sm">No active task right now. Rest or prepare for what's next.</p>
+            {next && (
+              <div className="mt-8 p-4 bg-charcoal/40 rounded-xl border border-white/5 inline-block">
+                <p className="text-xs text-mist uppercase tracking-wide mb-1">Up Next at {fmt12(next.startTime)}</p>
+                <p className="text-white font-semibold">{next.activity}</p>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <RescheduleModal task={reschedTask} open={!!reschedTask} onClose={()=>setReschedTask(null)} onReschedule={doReschedule} />
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// STATS VIEW
+// ═══════════════════════════════════════════════════════════════════════════════
+function StatsView({ schedule }) {
+  const total   = schedule.length;
+  const done    = schedule.filter(t=>t.completed).length;
+  const skipped = schedule.filter(t=>t.skipped).length;
+  const pending = total - done - skipped;
+  const rate    = total>0 ? Math.round((done/total)*100) : 0;
+
+  // FIX #15: safeDur prevents negative/NaN values
+  const catStats = schedule.reduce((a,t)=>{ a[t.category]=(a[t.category]||0)+safeDur(t.startTime,t.endTime); return a; },{});
+  const totalMin = Object.values(catStats).reduce((s,v)=>s+v,0);
+  const CAT_CLR  = {'Deep Work':'bg-amber-500','Health':'bg-emerald-500','Admin':'bg-purple-500','Meeting':'bg-blue-500','Break':'bg-gray-500'};
+
+  return (
+    <div className="flex flex-col h-full animate-slide-up p-5 max-w-2xl mx-auto w-full overflow-y-auto pb-32">
+      <div className="flex items-center justify-between mb-6 border-b border-white/5 pb-5">
+        <div>
+          <h2 className="text-2xl font-serif font-bold text-white">Daily Analytics</h2>
+          <p className="text-xs text-mist uppercase tracking-widest mt-0.5">Performance Review</p>
+        </div>
+        <Ic n="Trend" c="w-6 h-6 text-amber-400"/>
+      </div>
+
+      <div className="bg-charcoal/50 border border-white/5 rounded-2xl p-6 mb-5 text-center relative overflow-hidden">
+        <div className={`absolute inset-0 opacity-10 ${rate===100?'bg-emerald-500':'bg-amber-500'}`}></div>
+        <p className="text-mist text-xs font-medium uppercase tracking-wider mb-2">Completion Rate</p>
+        <div className="flex items-end justify-center gap-1">
+          <span className="text-6xl font-bold text-white">{rate}</span>
+          <span className="text-2xl text-mist mb-2">%</span>
+        </div>
+        <div className="w-full bg-gray-800 h-2 rounded-full mt-4 overflow-hidden">
+          <div className={`h-full transition-all duration-1000 ${rate===100?'bg-emerald-500':'bg-amber-500'}`} style={{width:`${rate}%`}}></div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2.5 mb-6">
+        <div className="bg-charcoal border border-white/5 rounded-xl p-3 flex flex-col items-center">
+          <Ic n="Check2" c="w-5 h-5 text-emerald-400 mb-1.5"/>
+          <span className="text-xl font-bold text-white">{done}</span>
+          <span className="text-[10px] text-mist mt-0.5 uppercase tracking-wide">Done</span>
+        </div>
+        <div className="bg-charcoal border border-white/5 rounded-xl p-3 flex flex-col items-center">
+          <Ic n="Circle" c="w-5 h-5 text-amber-400 mb-1.5"/>
+          <span className="text-xl font-bold text-white">{pending}</span>
+          <span className="text-[10px] text-mist mt-0.5 uppercase tracking-wide">Pending</span>
+        </div>
+        <div className="bg-charcoal border border-white/5 rounded-xl p-3 flex flex-col items-center">
+          <Ic n="ArrowR" c="w-5 h-5 text-gray-500 mb-1.5"/>
+          <span className="text-xl font-bold text-white">{skipped}</span>
+          <span className="text-[10px] text-mist mt-0.5 uppercase tracking-wide">Skipped</span>
+        </div>
+      </div>
+
+      <div className="bg-charcoal border border-white/5 rounded-xl p-4 flex items-center justify-between mb-6">
+        <div className="flex items-center gap-2">
+          <Ic n="Pie" c="w-5 h-5 text-blue-400"/>
+          <span className="text-sm text-gray-300">Total Planned</span>
+        </div>
+        <span className="text-xl font-bold text-white">{totalMin>0?`${Math.round(totalMin/60*10)/10}h`:'—'}</span>
+      </div>
+
+      <h3 className="text-base font-bold text-white mb-3">Time Distribution</h3>
+      {totalMin>0 ? (
+        <div className="space-y-3">
+          {Object.entries(catStats).sort(([,a],[,b])=>b-a).map(([cat,mins])=>{
+            const pct = Math.round((mins/totalMin)*100);
+            return (
+              <div key={cat}>
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-sm text-gray-300">{cat}</span>
+                  <span className="text-xs text-mist">{mins}m ({pct}%)</span>
+                </div>
+                <div className="w-full bg-gray-800 h-1.5 rounded-full overflow-hidden">
+                  <div className={`h-full ${CAT_CLR[cat]||'bg-gray-500'}`} style={{width:`${pct}%`,transition:'width 0.8s ease'}}></div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+      {total===0 && <p className="text-center text-mist text-sm mt-10">Generate a schedule to see analytics.</p>}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// HISTORY VIEW — last 7 days
+// ═══════════════════════════════════════════════════════════════════════════════
+function HistoryView({ onLoad }) {
+  const hist = readHistory();
+  const entries = Object.entries(hist).sort(([a],[b])=>b.localeCompare(a));
+
+  const CAT_DOT = {'Deep Work':'bg-amber-400','Health':'bg-emerald-400','Admin':'bg-purple-400','Meeting':'bg-blue-400','Break':'bg-gray-500'};
+
+  const fmtDate = (iso) => {
+    const today = localISO();
+    const [y,mo,d] = iso.split('-').map(Number);
+    const dt = new Date(y,mo-1,d);
+    const yest = new Date(); yest.setDate(yest.getDate()-1);
+    const yISO = `${yest.getFullYear()}-${String(yest.getMonth()+1).padStart(2,'0')}-${String(yest.getDate()).padStart(2,'0')}`;
+    if (iso===today) return 'Today';
+    if (iso===yISO)  return 'Yesterday';
+    return dt.toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'});
+  };
+
+  return (
+    <div className="flex flex-col h-full animate-slide-up p-5 max-w-2xl mx-auto w-full overflow-y-auto pb-32">
+      <div className="flex items-center justify-between mb-6 border-b border-white/5 pb-5">
+        <div>
+          <h2 className="text-2xl font-serif font-bold text-white">Schedule History</h2>
+          <p className="text-xs text-mist uppercase tracking-widest mt-0.5">Last 7 Days</p>
+        </div>
+        <Ic n="History" c="w-6 h-6 text-amber-400"/>
+      </div>
+
+      {entries.length===0 ? (
+        <div className="flex flex-col items-center justify-center flex-grow text-center py-20">
+          <Ic n="History" c="w-16 h-16 text-white/10 mb-5"/>
+          <p className="text-mist text-sm">No history yet.</p>
+          <p className="text-gray-600 text-xs mt-1">Generate your first schedule to start tracking.</p>
+        </div>
+      ) : entries.map(([date, { schedule }]) => {
+        const total = schedule.length;
+        const done    = schedule.filter(t=>t.completed).length;
+        const skipped = schedule.filter(t=>t.skipped).length;
+        const rate  = total>0 ? Math.round((done/total)*100) : 0;
+        const cats  = [...new Set(schedule.map(t=>t.category))].slice(0,4);
+        const barCls = rate===100 ? 'bg-emerald-500' : rate>50 ? 'bg-amber-500' : 'bg-red-500/70';
+
+        return (
+          <div key={date} className="bg-charcoal/50 border border-white/5 rounded-2xl p-4 mb-3 hover:border-white/10 transition-all group">
+            <div className="flex items-start justify-between mb-3">
+              <div>
+                <h3 className="text-white font-semibold leading-tight">{fmtDate(date)}</h3>
+                <p className="text-xs text-mist mt-0.5">{date}</p>
+              </div>
+              <div className="text-right shrink-0 ml-4">
+                <div className={`text-xl font-bold ${rate===100?'text-emerald-400':rate>50?'text-amber-400':'text-red-400'}`}>{rate}%</div>
+                <div className="text-xs text-mist">{done}/{total} done{skipped>0?` · ${skipped} skipped`:''}</div>
+              </div>
+            </div>
+            <div className="w-full bg-gray-800/80 h-1.5 rounded-full overflow-hidden mb-3">
+              <div className={`h-full ${barCls} transition-all duration-700`} style={{width:`${rate}%`}}></div>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex gap-1.5 flex-wrap min-w-0">
+                {cats.map(c=>(
+                  <span key={c} className="flex items-center gap-1 text-xs text-mist bg-white/5 px-2 py-0.5 rounded-full shrink-0">
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${CAT_DOT[c]||'bg-gray-400'}`}></span>
+                    <span className="truncate max-w-[60px]">{c}</span>
+                  </span>
+                ))}
+              </div>
+              <button onClick={()=>onLoad(schedule,date)}
+                className="focus-ring shrink-0 text-xs text-amber-400 hover:text-amber-300 font-semibold px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 rounded-lg transition-colors min-h-[36px]">
+                Load Plan
+              </button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ROOT APP
+// ═══════════════════════════════════════════════════════════════════════════════
+function App() {
+  const [apiKey, setApiKey]   = useState(()=>localStorage.getItem(API_KEY_STORAGE)||'');
+  const [showSet, setShowSet] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [fixing,  setFixing]  = useState(false);
+  const [toast,   setToast]   = useState(null);
+  const [notifPerm, setNotifPerm] = useState(()=>{
+    if (!('Notification' in window)) return 'unsupported';
+    return Notification.permission;
+  });
+
+  const notify = (msg, type='success') => setToast({ msg, type, id: Date.now() });
+
+  const saveKey = useCallback((k)=>{
+    setApiKey(k);
+    try { localStorage.setItem(API_KEY_STORAGE, k); } catch(e) {}
+  },[]);
+
+  const handleNotifReq = async () => {
+    const r = await askNotifPermission();
+    setNotifPerm(r);
+    if (r==='granted') notify("Notifications enabled! You'll be alerted before each task.", 'info');
+    else if (r==='denied') notify('Notifications blocked. Enable in device settings.', 'error');
+  };
+
+  const [state, setState] = useState(()=>{
+    const iso = localISO();
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const p = JSON.parse(raw);
+        const sched = p.schedule||[];
+        let mode = AppMode.BRAIN_DUMP;
+        if (sched.length>0) {
+          mode = AppMode.SCHEDULE;
+          if ((p.planDate||iso)===iso) {
+            const c = new Date().getHours()*60+new Date().getMinutes();
+            if (sched.some(t=>{ const s=toMin(t.startTime),e=toMin(t.endTime); return c>=s&&c<e; })) mode=AppMode.FOCUS;
+          }
+        }
+        return { ...p, schedule:sched, mode, error:null, planDate:p.planDate||iso };
+      }
+    } catch(e) {}
+    return { rawInput:'', schedule:[], mode:AppMode.BRAIN_DUMP, error:null, planDate:iso };
+  });
+
+  useEffect(()=>{ try{localStorage.setItem(STORAGE_KEY,JSON.stringify(state));}catch(e){} },[state]);
+
+  // Re-schedule notifications whenever schedule changes
+  useEffect(()=>{ if (state.schedule.length>0) scheduleNotifs(state.schedule,state.planDate); },[state.schedule,state.planDate]);
+
+  const set = patch => setState(prev=>({...prev,...patch}));
+  const switchMode = mode => set({mode});
+
+  const handleGenerate = async () => {
+    const trimmedInput = state.rawInput.trim();
+    if (!trimmedInput) return;
+    setLoading(true);
+    set({ error: null });
+    try {
+      // Save current schedule to history before replacing
+      if (state.schedule.length > 0) saveHistory(state.schedule, state.planDate);
+      const { schedule, planDate } = await generateSchedule(trimmedInput, apiKey);
+      if (!schedule || schedule.length === 0) throw new Error('No tasks were generated. Try adding more detail to your brain dump.');
+      set({ schedule, planDate, mode: AppMode.SCHEDULE });
+      saveHistory(schedule, planDate);
+      notify(`${schedule.length} tasks scheduled ✓`, 'success');
+    } catch(err) {
+      const msg = err.message || 'Failed to generate schedule. Please try again.';
+      set({ error: msg });
+    } finally { setLoading(false); }
+  };
+
+  const handleFix = async () => {
+    setFixing(true);
+    try {
+      const fixed = await fixScheduleAI(state.schedule, state.planDate, apiKey);
+      const wasOverlapping = findOverlaps(state.schedule).size;
+      set({ schedule: fixed });
+      saveHistory(fixed, state.planDate);
+      notify(wasOverlapping>0 ? `Overlaps resolved — schedule optimized ✓` : 'Schedule optimized by AI ✓', 'success');
+    } catch(err) {
+      notify(err.message||'Could not fix schedule.', 'error');
+    } finally { setFixing(false); }
+  };
+
+  const updateTask = t => setState(prev=>{
+    const updated = prev.schedule.map(s=>s.id===t.id?t:s);
+    saveHistory(updated, prev.planDate);
+    return {...prev, schedule:updated};
+  });
+  const deleteTask = id => setState(prev=>({...prev, schedule:prev.schedule.filter(t=>t.id!==id)}));
+  const addTask = () => setState(prev=>({
+    ...prev,
+    schedule:[...prev.schedule,{id:crypto.randomUUID(),startTime:'09:00',endTime:'10:00',activity:'New Task',category:'Deep Work',energyRequired:'Medium',notes:'',completed:false,skipped:false,subtasks:[]}]
+  }));
+  const loadHistoryPlan = (schedule, planDate) => {
+    set({ schedule, planDate, mode:AppMode.SCHEDULE });
+    notify(`Loaded plan from ${planDate}`, 'info');
+  };
+
+  const isBrainDump = state.mode === AppMode.BRAIN_DUMP;
+
+  return (
+    <div className="min-h-screen bg-obsidian text-slate-200 font-sans selection:bg-amber-500/30 selection:text-amber-200 overflow-hidden">
+      {toast && <Toast key={toast.id} msg={toast.msg} type={toast.type} onDone={()=>setToast(null)} />}
+
+      {/* Ambient background */}
+      <div className="fixed inset-0 z-0 pointer-events-none">
+        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-purple-900/10 rounded-full blur-[120px] opacity-30"></div>
+        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-amber-900/10 rounded-full blur-[120px] opacity-20"></div>
+      </div>
+
+      {/* FIX #8: safe-area top padding */}
+      <main className="relative z-10 h-screen flex flex-col pt-safe">
+        {/* Header (brain dump only) */}
+        {isBrainDump && (
+          <header className="flex items-center justify-between px-6 py-5 md:px-8 shrink-0">
+            <div className="flex items-center gap-2.5">
+              <Ic n="Box" c="w-6 h-6 text-white"/>
+              <span className="font-serif font-bold text-xl tracking-tight text-white">Chronos</span>
+              <span className="text-xs text-mist/60 ml-1 hidden sm:inline">Elite</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <button onClick={()=>setShowSet(true)}
+                className="focus-ring text-mist hover:text-white transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-white/5">
+                <Ic n="Settings" c="w-5 h-5"/>
+              </button>
+              <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse block"></span>
+            </div>
+          </header>
+        )}
+
+        {/* Error banner */}
+        {state.error && (
+          <div className="mx-5 mt-3 p-3.5 bg-red-900/20 border border-red-500/30 text-red-200 rounded-xl text-sm text-center shrink-0">
+            {state.error}
+            {state.error.toLowerCase().includes('api key') && (
+              <button onClick={()=>setShowSet(true)} className="block mt-1 text-xs text-red-300 underline mx-auto">Open Settings</button>
+            )}
+          </div>
+        )}
+
+        {/* Content */}
+        <div className="flex-grow flex flex-col overflow-hidden">
+          {state.mode===AppMode.BRAIN_DUMP && (
+            <BrainDump value={state.rawInput} onChange={v=>set({rawInput:v})} onGenerate={handleGenerate}
+              loading={loading} hasSchedule={state.schedule.length>0}
+              onCancel={()=>set({mode:AppMode.SCHEDULE})} onOpenSettings={()=>setShowSet(true)} apiKey={apiKey} />
+          )}
+          {state.mode===AppMode.SCHEDULE && (
+            <ScheduleView schedule={state.schedule} planDate={state.planDate}
+              onReset={()=>set({mode:AppMode.BRAIN_DUMP})} onUpdate={updateTask} onDelete={deleteTask} onAdd={addTask}
+              onFix={handleFix} fixing={fixing} />
+          )}
+          {state.mode===AppMode.FOCUS   && <FocusMode schedule={state.schedule} planDate={state.planDate} onUpdate={updateTask}/>}
+          {state.mode===AppMode.STATS   && <StatsView schedule={state.schedule}/>}
+          {state.mode===AppMode.HISTORY && <HistoryView onLoad={loadHistoryPlan}/>}
+        </div>
+
+        {/* Bottom Navigation — FIX #8: safe area bottom padding */}
+        {!isBrainDump && (
+          <nav className="border-t border-white/5 bg-charcoal/90 backdrop-blur-xl pt-2 pb-safe px-4 shrink-0 sticky bottom-0 z-20">
+            <div className="flex justify-around items-center max-w-md mx-auto">
+              {[
+                { mode:AppMode.SCHEDULE, n:'Layers',    label:'Plan'    },
+                { mode:AppMode.FOCUS,    n:'PlayCirc',  label:'Focus'   },
+                { mode:AppMode.STATS,    n:'BarChart',  label:'Stats'   },
+                { mode:AppMode.HISTORY,  n:'History',   label:'History' },
+              ].map(({mode,n,label})=>(
+                <button key={mode} onClick={()=>switchMode(mode)}
+                  className={`focus-ring flex flex-col items-center gap-1 transition-colors min-w-[52px] min-h-[52px] justify-center rounded-lg ${state.mode===mode?'text-amber-400':'text-gray-500 hover:text-white'}`}>
+                  <Ic n={n} c="w-5 h-5"/>
+                  <span className="text-[10px] uppercase tracking-wider font-semibold">{label}</span>
+                </button>
+              ))}
+              <button onClick={()=>setShowSet(true)}
+                className="focus-ring flex flex-col items-center gap-1 transition-colors text-gray-500 hover:text-white min-w-[52px] min-h-[52px] justify-center rounded-lg">
+                <Ic n="Settings" c="w-5 h-5"/>
+                <span className="text-[10px] uppercase tracking-wider font-semibold">Config</span>
+              </button>
+            </div>
+          </nav>
+        )}
+      </main>
+
+      <SettingsModal open={showSet} onClose={()=>setShowSet(false)}
+        apiKey={apiKey} onSave={saveKey} notifPerm={notifPerm} onReqNotif={handleNotifReq} />
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
